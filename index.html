@@ -513,6 +513,16 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
           <div class="form-item"><label>勤務終了</label><input type="time" id="cfg-end" value="17:00"></div>
           <div class="form-item"><label>早出残業開始</label><input type="time" id="cfg-early" value="07:00"></div>
           <div class="form-item"><label>残業開始時刻</label><input type="time" id="cfg-otstart" value="17:10"></div>
+          <div class="form-item" style="grid-column:1/-1">
+            <label>締め日</label>
+            <select id="cfg-closing" style="max-width:280px">
+              <option value="20">20日締め（前月21日〜当月20日）</option>
+              <option value="25">25日締め（前月26日〜当月25日）</option>
+              <option value="31">月末締め（当月1日〜当月末日）</option>
+              <option value="15">15日締め（前月16日〜当月15日）</option>
+            </select>
+            <p style="font-size:11px;color:var(--text2);margin-top:4px">※ 締め日を変更すると対象月の日付範囲が変わります。カレンダー・Excel出力に反映されます。</p>
+          </div>
         </div>
         <button class="btn btn-accent btn-sm" onclick="saveSettings()">保存</button>
       </div>
@@ -651,6 +661,7 @@ let state = {
   cfg: {
     workStart:'08:00', workEnd:'17:00',
     earlyStart:'07:00', otStart:'17:10',
+    closingDay: 20,  // 締め日（20=20日締め、31=月末締め）
     breaks:[{from:'10:00',to:'10:10'},{from:'12:00',to:'12:40'},{from:'15:00',to:'15:10'}]
   },
   depts: ['製造部','管理部'],
@@ -1129,8 +1140,11 @@ function sortKey21(dateStr) {
   if(!dateStr || dateStr.length < 10) return dateStr;
   const p = dateStr.split('-');
   const day = parseInt(p[2]);
-  const order = day >= 21 ? day - 21 : day + 10;
-  return p[0] + '-' + String(parseInt(p[1]) + (day >= 21 ? 0 : 1)).padStart(2,'0') + '-' + String(order).padStart(2,'0');
+  const cd = state.cfg.closingDay || 20;
+  if(cd === 31) return dateStr; // 月末締めは日付順そのまま
+  const startDay = cd + 1;
+  const order = day >= startDay ? day - startDay : day + (31 - startDay);
+  return p[0] + '-' + String(parseInt(p[1]) + (day >= startDay ? 0 : 1)).padStart(2,'0') + '-' + String(order).padStart(2,'0');
 }
 
 function getSortedRows() {
@@ -1562,6 +1576,7 @@ function renderSettingsUI(){
   document.getElementById('cfg-end').value=state.cfg.workEnd;
   document.getElementById('cfg-early').value=state.cfg.earlyStart;
   document.getElementById('cfg-otstart').value=state.cfg.otStart;
+  document.getElementById('cfg-closing').value=String(state.cfg.closingDay||20);
   renderBreakSlots();renderSettingsSummary();
 }
 function renderBreakSlots(){
@@ -1583,13 +1598,18 @@ function saveSettings(){
   state.cfg.workEnd=document.getElementById('cfg-end').value;
   state.cfg.earlyStart=document.getElementById('cfg-early').value;
   state.cfg.otStart=document.getElementById('cfg-otstart').value;
+  state.cfg.closingDay=parseInt(document.getElementById('cfg-closing').value)||20;
   saveState();renderSettingsSummary();renderTable();calcSummary();toast('設定を保存しました');
 }
 function renderSettingsSummary(){
+  const cd = state.cfg.closingDay||20;
+  const cdLabel = cd===31?'月末締め（1日〜末日）':cd===20?'20日締め（前月21日〜当月20日）':cd===25?'25日締め（前月26日〜当月25日）':`${cd}日締め`;
   const totalBreak=state.cfg.breaks.reduce((acc,b)=>{const d=toMin(b.to)-toMin(b.from);return acc+(d>0?d:0);},0);
   document.getElementById('settingsSummary').innerHTML=`
     勤務時間：<strong>${state.cfg.workStart} 〜 ${state.cfg.workEnd}</strong>　|　早出残業：<strong>${state.cfg.earlyStart} 〜 ${state.cfg.workStart}</strong>　|　残業開始：<strong>${state.cfg.otStart}〜</strong>（30分単位切り捨て）<br>
-    休憩：${state.cfg.breaks.map(b=>`${b.from}〜${b.to}`).join('　')}　（合計 ${totalBreak} 分）`;
+    休憩：${state.cfg.breaks.map(b=>`${b.from}〜${b.to}`).join('　')}　（合計 ${totalBreak} 分）<br>
+    締め日：<strong>${cdLabel}</strong>
+  `;
 }
 
 // ===== EXPORT / IMPORT =====
@@ -1892,18 +1912,28 @@ function renderCalendar() {
       .map(u => u.date)
   );
 
-  // 20日締め：対象月の前月21日〜当月20日を生成
+  // 締め日設定に基づいて対象期間の日付を生成
+  const cd = state.cfg.closingDay || 20;
   const dates = [];
-  // 前月21日〜前月末
-  const pm = m === 1 ? 12 : m - 1;
-  const py = m === 1 ? y - 1 : y;
-  const lastDayOfPrevMonth = new Date(y, m - 1, 0).getDate();
-  for(let d = 21; d <= lastDayOfPrevMonth; d++) {
-    dates.push(`${py}-${String(pm).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
-  }
-  // 当月1日〜20日
-  for(let d = 1; d <= 20; d++) {
-    dates.push(`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+
+  if(cd === 31) {
+    // 月末締め：当月1日〜当月末日
+    const lastDay = new Date(y, m, 0).getDate();
+    for(let d=1; d<=lastDay; d++) {
+      dates.push(`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+    }
+  } else {
+    // X日締め：前月(X+1)日〜当月X日
+    const startDay = cd + 1;
+    const pm = m === 1 ? 12 : m - 1;
+    const py = m === 1 ? y - 1 : y;
+    const lastDayOfPrevMonth = new Date(y, m - 1, 0).getDate();
+    for(let d = startDay; d <= lastDayOfPrevMonth; d++) {
+      dates.push(`${py}-${String(pm).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+    }
+    for(let d = 1; d <= cd; d++) {
+      dates.push(`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+    }
   }
 
   // カレンダー描画（月〜日の順）
