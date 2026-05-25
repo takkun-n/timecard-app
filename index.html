@@ -231,15 +231,6 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
 
 <!-- ===== ATTENDANCE ===== -->
 <div class="page active" id="page-attendance">
-  <div class="howto">
-    <strong>📋 使い方</strong>
-    <ol>
-      <li><span class="step-b">1</span>対象年月を選択し、従業員タブを選ぶ</li>
-      <li><span class="step-b">2</span>Claudeチャットでタイムカードを読み取り、JSONをコピー</li>
-      <li><span class="step-b">3</span>貼り付け欄にペーストして「差分追加」→ 新しい日付のみ追加・修正済みデータは保持</li>
-      <li><span class="step-b">4</span>確認・修正後「保存」→ ブラウザを閉じてもデータが残ります</li>
-    </ol>
-  </div>
 
   <!-- 年月選択 -->
   <div class="card">
@@ -388,7 +379,7 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
     <div class="card-body" style="padding:0">
       <div class="table-wrap">
         <table class="master-table">
-          <thead><tr><th>氏名</th><th>部署</th><th>所定時間(h)</th><th>残業対象</th><th>操作</th></tr></thead>
+          <thead><tr><th>氏名</th><th>部署</th><th>雇用区分</th><th>所定時間(h)</th><th>残業対象</th><th>操作</th></tr></thead>
           <tbody id="empMasterBody"></tbody>
         </table>
       </div>
@@ -465,7 +456,13 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
     <div class="form-grid" style="grid-template-columns:1fr 1fr;margin-bottom:1rem">
       <div class="form-item" style="grid-column:1/-1"><label>氏名</label><input type="text" id="mEmpName" placeholder="山田 太郎"></div>
       <div class="form-item"><label>部署</label><select id="mEmpDept"><option value="">（なし）</option></select></div>
-      <div class="form-item"><label>所定労働時間（h/日）</label><input type="number" id="mEmpHours" value="8" step="0.5" min="1" max="12"></div>
+      <div class="form-item"><label>雇用区分</label>
+        <select id="mEmpType">
+          <option value="fulltime">正社員（遅早：打刻基準）</option>
+          <option value="part">パート（遅早：所定時間基準）</option>
+        </select>
+      </div>
+      <div class="form-item" style="grid-column:1/-1"><label>所定労働時間（h/日）</label><input type="number" id="mEmpHours" value="8" step="0.5" min="1" max="12"></div>
     </div>
     <div class="toggle-wrap" style="margin-bottom:1.25rem">
       <label class="toggle"><input type="checkbox" id="mEmpOT" checked><span class="toggle-slider"></span></label>
@@ -851,7 +848,9 @@ function importPaste() {
     calcSummary();
     renderAllSummary();
     updateDlBtn();
-
+    updateGuide();
+    // 差分追加後に貼り付け欄を自動クリア
+    clearPaste();
     const msg = skipped > 0
       ? `✓ ${toAdd.length}件を追加しました。${skipped}件は既存データがあるためスキップ（修正済みデータは保持）`
       : `✓ ${toAdd.length}件を追加しました`;
@@ -892,33 +891,24 @@ function floor30(h) { return Math.floor(h*2)/2; }
 function calcTimes(clockIn, clockOut, emp) {
   const r = {actual:0, early:0, overtime:0, late:0};
   const stdHours = emp ? parseFloat(emp.stdHours)||8 : 8;
+  const empType  = emp ? (emp.empType || 'fulltime') : 'fulltime'; // fulltime / part
   if(!clockIn || !clockOut) return r;
 
   const inM      = toMin(clockIn);
   const outM     = toMin(clockOut);
-  const startM   = toMin(state.cfg.workStart);   // 08:00 = 480
-  const endM     = toMin(state.cfg.workEnd);      // 17:00 = 1020
-  const earlyM   = toMin(state.cfg.earlyStart);   // 07:00 = 420
-  const otStartM = toMin(state.cfg.otStart);      // 17:10 = 1030
+  const startM   = toMin(state.cfg.workStart);   // 08:00
+  const endM     = toMin(state.cfg.workEnd);      // 17:00
+  const earlyM   = toMin(state.cfg.earlyStart);   // 07:00
+  const otStartM = toMin(state.cfg.otStart);      // 17:10
 
-  // ── 早出ルール ──
-  // 7:00（earlyStart）より前に出勤した場合のみ早出対象
-  // 7:01〜8:00は早出なし、実働は8:00から計算
-  // 7:00より前出勤の場合、実働開始は7:00から
+  // ── 早出ルール（正社員のみ） ──
+  // 7:00より前に出勤した場合のみ早出（7:00〜8:00の1h）
+  // 7:01〜8:00は早出なし
   const effectiveInM = inM < earlyM ? earlyM : (inM < startM ? startM : inM);
-
-  if(inM < earlyM) {
-    // 7:00より前出勤 → 早出あり（7:00〜8:00 = 1.0h固定）
-    r.early = floor30((startM - earlyM) / 60);
+  if(empType === 'fulltime' && inM < earlyM) {
+    r.early = floor30((startM - earlyM) / 60); // 7:00〜8:00 = 1.0h
   } else {
     r.early = 0;
-  }
-
-  // ── 遅刻・早退 ──
-  if(inM > startM) {
-    r.late = floor30((inM - startM) / 60);
-  } else if(outM < endM) {
-    r.late = floor30((endM - outM) / 60);
   }
 
   // ── 休憩（実働時間帯に重なる分のみ）──
@@ -933,12 +923,32 @@ function calcTimes(clockIn, clockOut, emp) {
   const totalMin = outM - effectiveInM - breakMin;
   r.actual = Math.max(0, floor30(totalMin / 60));
 
-  // ── 残業対象外 ──
+  // ── 遅早の判定 ──
+  // 正社員：打刻ベース（8:00より遅い出勤 or 17:00より早い退勤）
+  // パート：実働時間 vs 所定時間の差分
+  if(empType === 'part') {
+    // パート：実働が所定時間より少なければ遅早
+    const diff = stdHours - r.actual;
+    r.late = diff > 0 ? floor30(diff) : 0;
+  } else {
+    // 正社員：打刻ベース
+    if(inM > startM) {
+      r.late = floor30((inM - startM) / 60);
+    } else if(outM < endM) {
+      r.late = floor30((endM - outM) / 60);
+    } else {
+      r.late = 0;
+    }
+  }
+
+  // ── 残業対象外（管理職等）──
   if(emp && !emp.hasOT) {
     r.overtime = 0;
     r.early = 0;
+    r.late = 0; // 遅早も対象外
     if(r.late === 0) r.actual = stdHours;
   } else {
+    // 残業対象あり：otStart(17:10)以降を残業（30分単位切り捨て）
     r.overtime = outM > otStartM ? floor30((outM - otStartM) / 60) : 0;
   }
 
@@ -1295,10 +1305,12 @@ function renderEmpMaster() {
   const tbody = document.getElementById('empMasterBody');
   tbody.innerHTML = '';
   state.empMasters.forEach(emp => {
+    const typeLabel = emp.empType === 'part' ? '<span class="badge badge-info">パート</span>' : '<span class="badge badge-gray">正社員</span>';
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td style="font-weight:500">${emp.name}</td>
       <td>${emp.dept||'—'}</td>
+      <td>${typeLabel}</td>
       <td style="font-family:var(--mono)">${emp.stdHours}h</td>
       <td><span class="badge ${emp.hasOT?'badge-ok':'badge-gray'}">${emp.hasOT?'あり':'なし（管理職等）'}</span></td>
       <td style="display:flex;gap:6px">
@@ -1316,6 +1328,7 @@ function showEmpForm(id=null) {
   document.getElementById('mEmpName').value=emp?emp.name:'';
   document.getElementById('mEmpHours').value=emp?emp.stdHours:8;
   document.getElementById('mEmpOT').checked=emp?emp.hasOT:true;
+  document.getElementById('mEmpType').value=emp?(emp.empType||'fulltime'):'fulltime';
   populateDeptSelect('mEmpDept');
   setTimeout(()=>{ document.getElementById('mEmpDept').value=emp?emp.dept:''; },50);
   document.getElementById('empFormModal').classList.add('show');
@@ -1330,7 +1343,13 @@ function deleteEmp(id){
 function saveEmp(){
   const name=document.getElementById('mEmpName').value.trim();
   if(!name){alert('氏名を入力してください');return;}
-  const data={name,dept:document.getElementById('mEmpDept').value,stdHours:parseFloat(document.getElementById('mEmpHours').value)||8,hasOT:document.getElementById('mEmpOT').checked};
+  const data={
+    name,
+    dept:document.getElementById('mEmpDept').value,
+    empType:document.getElementById('mEmpType').value,
+    stdHours:parseFloat(document.getElementById('mEmpHours').value)||8,
+    hasOT:document.getElementById('mEmpOT').checked
+  };
   if(editEmpId){Object.assign(state.empMasters.find(e=>e.id===editEmpId),data);}
   else{data.id=++state.empIdSeq;state.empMasters.push(data);}
   hideEmpForm();saveState();renderEmpMaster();renderEmpTabs();toast(editEmpId?'更新しました':'登録しました');
