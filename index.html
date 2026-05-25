@@ -1892,17 +1892,18 @@ function renderCalendar() {
       .map(u => u.date)
   );
 
-  // 21日始まりで全日付を生成
+  // 20日締め：対象月の前月21日〜当月20日を生成
   const dates = [];
-  for(let d=21; d<=31; d++) {
-    const ds = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    const dt = new Date(y, m-1, d);
-    if(dt.getMonth() === m-1) dates.push(ds);
+  // 前月21日〜前月末
+  const pm = m === 1 ? 12 : m - 1;
+  const py = m === 1 ? y - 1 : y;
+  const lastDayOfPrevMonth = new Date(y, m - 1, 0).getDate();
+  for(let d = 21; d <= lastDayOfPrevMonth; d++) {
+    dates.push(`${py}-${String(pm).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
   }
-  const nm = m === 12 ? 1 : m+1;
-  const ny = m === 12 ? y+1 : y;
-  for(let d=1; d<=20; d++) {
-    dates.push(`${ny}-${String(nm).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+  // 当月1日〜20日
+  for(let d = 1; d <= 20; d++) {
+    dates.push(`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
   }
 
   // カレンダー描画（月〜日の順）
