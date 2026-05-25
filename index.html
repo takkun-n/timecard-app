@@ -193,7 +193,7 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
 <header>
   <div class="brand">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-    タイムカード勤怠管理<span class="brand-sub">powered by Claude AI</span>
+    タイムカード勤怠管理
   </div>
   <div class="user-pill">
     <div class="user-avatar" id="userAvatar">U</div>
@@ -242,7 +242,6 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
   <div class="card">
     <div class="card-head">
       <div class="card-title">👤 従業員</div>
-      <button class="btn btn-sm" onclick="showPromptModal()">💬 Claude用プロンプト</button>
     </div>
     <div class="card-body" style="padding:.75rem 1.25rem">
       <div class="emp-tabs" id="empTabs"></div>
@@ -454,18 +453,6 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
       <button class="btn" onclick="hideDeptForm()">キャンセル</button>
       <button class="btn btn-accent" onclick="saveDept()">保存</button>
     </div>
-  </div>
-</div>
-
-<div class="modal-bg" id="promptModal">
-  <div class="modal">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
-      <h3>💬 Claude用プロンプト</h3>
-      <button onclick="hidePromptModal()" style="border:none;background:none;cursor:pointer;font-size:20px;color:var(--text2)">×</button>
-    </div>
-    <p style="font-size:13px;color:var(--text2);margin-bottom:.75rem">タイムカード画像と一緒に以下をClaudeに送ってください：</p>
-    <pre id="promptText"></pre>
-    <button class="btn btn-accent" style="margin-top:.75rem" onclick="copyPrompt()">📋 コピー</button>
   </div>
 </div>
 
@@ -737,52 +724,55 @@ function toMin(t) { if(!t) return null; const[h,m]=t.split(':').map(Number); ret
 function floor30(h) { return Math.floor(h*2)/2; }
 
 function calcTimes(clockIn, clockOut, emp) {
-  const r = {actual:null, early:0, overtime:0, late:0};
+  const r = {actual:0, early:0, overtime:0, late:0};
   const stdHours = emp ? parseFloat(emp.stdHours)||8 : 8;
-
   if(!clockIn || !clockOut) return r;
 
-  const inM  = toMin(clockIn);
-  const outM = toMin(clockOut);
-  const startM   = toMin(state.cfg.workStart);  // 08:00
-  const endM     = toMin(state.cfg.workEnd);     // 17:00
-  const earlyM   = toMin(state.cfg.earlyStart);  // 07:00
-  const otStartM = toMin(state.cfg.otStart);     // 17:10
+  const inM      = toMin(clockIn);
+  const outM     = toMin(clockOut);
+  const startM   = toMin(state.cfg.workStart);   // 08:00 = 480
+  const endM     = toMin(state.cfg.workEnd);      // 17:00 = 1020
+  const earlyM   = toMin(state.cfg.earlyStart);   // 07:00 = 420
+  const otStartM = toMin(state.cfg.otStart);      // 17:10 = 1030
 
-  // 休憩：実際に出勤中に重なる休憩時間のみ差し引く
-  let breakMin = 0;
-  state.cfg.breaks.forEach(b => {
-    const bs = toMin(b.from), be = toMin(b.to);
-    const oS = Math.max(inM, bs), oE = Math.min(outM, be);
-    if(oE > oS) breakMin += oE - oS;
-  });
+  // ── 早出ルール ──
+  // 7:00（earlyStart）より前に出勤した場合のみ早出対象
+  // 7:01〜8:00は早出なし、実働は8:00から計算
+  // 7:00より前出勤の場合、実働開始は7:00から
+  const effectiveInM = inM < earlyM ? earlyM : (inM < startM ? startM : inM);
 
-  // 早出残業：earlyStart〜workStart の間に出勤した分（30分単位切り捨て）
-  if(inM < startM && inM >= earlyM) {
-    r.early = floor30((startM - inM) / 60);
+  if(inM < earlyM) {
+    // 7:00より前出勤 → 早出あり（7:00〜8:00 = 1.0h固定）
+    r.early = floor30((startM - earlyM) / 60);
+  } else {
+    r.early = 0;
   }
 
-  // 遅刻：workStart より後に出勤（30分単位切り捨て）
-  // 早退：workEnd より前に退勤（30分単位切り捨て）
+  // ── 遅刻・早退 ──
   if(inM > startM) {
     r.late = floor30((inM - startM) / 60);
   } else if(outM < endM) {
     r.late = floor30((endM - outM) / 60);
   }
 
-  // 実働時間 = 出退勤差 - 休憩
-  const totalMin = outM - inM - breakMin;
+  // ── 休憩（実働時間帯に重なる分のみ）──
+  let breakMin = 0;
+  state.cfg.breaks.forEach(b => {
+    const bs = toMin(b.from), be = toMin(b.to);
+    const oS = Math.max(effectiveInM, bs), oE = Math.min(outM, be);
+    if(oE > oS) breakMin += oE - oS;
+  });
+
+  // ── 実働（effectiveInM〜退勤 - 休憩）──
+  const totalMin = outM - effectiveInM - breakMin;
   r.actual = Math.max(0, floor30(totalMin / 60));
 
-  // 残業対象外：残業=0、実働は所定時間固定（遅早・有休がなければ）
+  // ── 残業対象外 ──
   if(emp && !emp.hasOT) {
     r.overtime = 0;
-    // 遅刻・早退・有休なし → 実働を所定時間に固定
-    if(r.late === 0) {
-      r.actual = stdHours;
-    }
+    r.early = 0;
+    if(r.late === 0) r.actual = stdHours;
   } else {
-    // 残業対象あり：otStart以降を残業（30分単位切り捨て）
     r.overtime = outM > otStartM ? floor30((outM - otStartM) / 60) : 0;
   }
 
@@ -791,12 +781,11 @@ function calcTimes(clockIn, clockOut, emp) {
 
 // 日付を21日始まりでソートするキー
 function sortKey21(dateStr) {
-  const d = new Date(dateStr + 'T00:00:00');
-  if(isNaN(d)) return dateStr;
-  const day = d.getDate();
-  // 21日以降 → 0〜9、20日以前 → 10〜29 として並べる
+  if(!dateStr || dateStr.length < 10) return dateStr;
+  const p = dateStr.split('-');
+  const day = parseInt(p[2]);
   const order = day >= 21 ? day - 21 : day + 10;
-  return String(order).padStart(2,'0') + '-' + dateStr;
+  return p[0] + '-' + String(parseInt(p[1]) + (day >= 21 ? 0 : 1)).padStart(2,'0') + '-' + String(order).padStart(2,'0');
 }
 
 function getSortedRows() {
@@ -805,14 +794,23 @@ function getSortedRows() {
 }
 
 // ===== TABLE =====
+// 曜日をZellerの公式で計算（タイムゾーン完全無関係）
+function getWeekday(dateStr) {
+  if(!dateStr || dateStr.length < 10) return -1;
+  const p = dateStr.split('-');
+  if(p.length < 3) return -1;
+  let y = parseInt(p[0]), m = parseInt(p[1]), d = parseInt(p[2]);
+  if(m < 3) { m += 12; y -= 1; }
+  const k = y % 100, j = Math.floor(y / 100);
+  const h = (d + Math.floor(13*(m+1)/5) + k + Math.floor(k/4) + Math.floor(j/4) + 5*j) % 7;
+  // h: 0=土,1=日,2=月,3=火,4=水,5=木,6=金
+  const jsDay = [6,0,1,2,3,4,5][h];
+  return jsDay; // 0=日,1=月,...,6=土
+}
+
 function getDayCell(dateStr) {
-  if(!dateStr || dateStr.length < 10) return '';
-  // タイムゾーンの影響を受けないよう年月日を直接パース
-  const parts = dateStr.split('-');
-  if(parts.length < 3) return '';
-  const d = new Date(parseInt(parts[0]), parseInt(parts[1])-1, parseInt(parts[2]));
-  if(isNaN(d.getTime())) return '';
-  const w = d.getDay();
+  const w = getWeekday(dateStr);
+  if(w < 0) return '';
   return `<span class="${w===0?'day-sun':w===6?'day-sat':''}">${DAYS[w]}</span>`;
 }
 
@@ -1062,9 +1060,8 @@ function downloadMonth(ym) {
     const rows = [...rawRows].sort((a,b)=>sortKey21(a.date).localeCompare(sortKey21(b.date)));
     let days=0,total=0,early=0,ot=0,late=0;
     const dataRows = rows.map(r=>{
-      const parts = r.date ? r.date.split('-') : [];
-      const d = parts.length===3 ? new Date(parseInt(parts[0]),parseInt(parts[1])-1,parseInt(parts[2])) : new Date('invalid');
-      const dj=isNaN(d.getTime())?'':DAYS[d.getDay()];
+      const w = getWeekday(r.date);
+      const dj = w >= 0 ? DAYS[w] : '';
       const t=calcTimes(r.clockIn,r.clockOut,emp);
       const earlyVal  = r._earlyOverride  != null ? r._earlyOverride  : (t.early  || 0);
       const actualVal = r._actualOverride != null ? r._actualOverride : (t.actual || 0);
@@ -1095,10 +1092,10 @@ function downloadMonth(ym) {
       ['日','曜','出勤欠勤','早出残業','遅刻早退','摘要'],
     ];
     rows.forEach(r=>{
-      const parts = r.date ? r.date.split('-') : [];
-      const d = parts.length===3 ? new Date(parseInt(parts[0]),parseInt(parts[1])-1,parseInt(parts[2])) : new Date('invalid');
-      const dj=isNaN(d.getTime())?'':DAYS[d.getDay()];
-      const day=isNaN(d.getTime())?'':d.getDate();
+      const p = r.date ? r.date.split('-') : [];
+      const day = p.length===3 ? parseInt(p[2]) : '';
+      const w = getWeekday(r.date);
+      const dj = w >= 0 ? DAYS[w] : '';
       const t=calcTimes(r.clockIn,r.clockOut,emp);
       const earlyVal = r._earlyOverride != null ? r._earlyOverride : (t.early||0);
       const lateVal  = r._lateOverride  != null ? r._lateOverride  : (t.late ||0);
@@ -1258,35 +1255,7 @@ function importData(input){
   input.value='';
 }
 
-// ===== PROMPT =====
-function showPromptModal(){
-  const[year,month]=currentMonth.split('-');
-  document.getElementById('promptText').textContent=
-`これはアマノBカード形式の日本語タイムカード（${year}年${month}月分）です。
-表面は21日〜月末、裏面は6日〜20日の打刻が記録されています。
-
-以下のJSON配列形式のみで出力してください（説明文不要）：
-[{"date":"${year}-${month}-DD","clockIn":"HH:MM","clockOut":"HH:MM","note":""}]
-
-読み取りルール：
-・「定時出」列（青背景）＝出勤打刻。曜日略字（木・金など）が前につく場合あり
-・「時間外」列＝退勤打刻。同様に曜日略字が前につく場合あり
-・赤い丸印鑑がある行は休日。打刻があればnoteに"休日出勤"と記入
-・遅刻・早退が明記されていればnoteに記入
-・読み取れない場合はclockIn/clockOutを""にする
-・打刻のない日は省略可
-・DDは2桁ゼロ埋め
-・両面ある場合は全日分を1つの配列にまとめる
-
-JSON配列のみを返してください。`;
-  document.getElementById('promptModal').classList.add('show');
-}
-function hidePromptModal(){document.getElementById('promptModal').classList.remove('show');}
-function copyPrompt(){
-  navigator.clipboard.writeText(document.getElementById('promptText').textContent)
-    .then(()=>toast('コピーしました！'))
-    .catch(()=>alert('手動でコピーしてください'));
-}
+// ===== HELPERS =====
 
 // ===== HELPERS =====
 function setStatus(msg){document.getElementById('statusBar').textContent=msg;}
