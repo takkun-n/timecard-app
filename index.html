@@ -285,7 +285,7 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
       <div class="table-wrap">
         <table class="data-table">
           <thead><tr>
-            <th style="width:80px">日付</th>
+            <th style="width:100px">日付</th>
             <th style="width:32px">曜</th>
             <th style="width:68px">出勤</th>
             <th style="width:68px">退勤</th>
@@ -293,6 +293,7 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
             <th style="width:58px">実働(h)</th>
             <th style="width:58px">残業(h)</th>
             <th style="width:58px">遅早(h)</th>
+            <th style="width:80px">備考</th>
             <th style="width:56px">状態</th>
             <th style="width:28px"></th>
           </tr></thead>
@@ -555,11 +556,16 @@ function doLogout() {
 }
 
 function initApp() {
+  // 必ず現在月を正しく設定
+  currentMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  currentEmpId = null;
+  document.getElementById('yearMonth').value = currentMonth;
   renderSettingsUI();
   renderEmpMaster();
   renderDeptMaster();
   renderRecentMonths();
   renderEmpTabs();
+  renderTable();
   renderAllSummary();
   renderHistory();
   updateDlBtn();
@@ -772,26 +778,28 @@ function renderTable() {
   const tbody = document.getElementById('tableBody');
   tbody.innerHTML = '';
   if(!currentEmpId || rows.length===0) {
-    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:1.5rem;color:var(--text2)">データがありません</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:1.5rem;color:var(--text2)">データがありません</td></tr>`;
     return;
   }
   rows.forEach((r,i) => {
     const t = calcTimes(r.clockIn, r.clockOut, emp);
     const warn = !r.clockIn || !r.clockOut;
     const isNew = r._new;
-    const bTxt = r.note==='休日出勤'?'休日出勤':warn?'要確認':'正常';
-    const bCls = r.note==='休日出勤'?'badge-info':warn?'badge-warn':'badge-ok';
+    const hasNote = r.note && r.note !== '';
+    const bTxt = hasNote ? r.note : warn ? '要確認' : '正常';
+    const bCls = r.note==='休日出勤'?'badge-info': r.note==='休日'?'badge-gray': warn?'badge-warn':'badge-ok';
     const tr = document.createElement('tr');
     if(isNew) tr.className = 'row-new';
     tr.innerHTML = `
-      <td><input type="text" value="${r.date||''}" style="width:74px" onchange="updRow(${i},'date',this.value)"></td>
+      <td><input type="text" value="${r.date||''}" style="width:96px;font-size:12px" onchange="updRow(${i},'date',this.value)"></td>
       <td>${getDayCell(r.date)}</td>
-      <td><input type="text" value="${r.clockIn||''}" placeholder="08:00" style="width:54px" onchange="updRow(${i},'clockIn',this.value)"></td>
-      <td><input type="text" value="${r.clockOut||''}" placeholder="17:00" style="width:54px" onchange="updRow(${i},'clockOut',this.value)"></td>
+      <td><input type="text" value="${r.clockIn||''}" placeholder="08:00" style="width:56px" onchange="updRow(${i},'clockIn',this.value)"></td>
+      <td><input type="text" value="${r.clockOut||''}" placeholder="17:00" style="width:56px" onchange="updRow(${i},'clockOut',this.value)"></td>
       <td style="text-align:right;font-family:var(--mono);padding-right:8px">${t.early!=null?t.early.toFixed(1):'—'}</td>
       <td style="text-align:right;font-family:var(--mono);padding-right:8px">${t.actual!=null?t.actual.toFixed(1):'—'}</td>
       <td style="text-align:right;font-family:var(--mono);padding-right:8px">${t.overtime!=null?(t.overtime>0?`<span style="color:var(--danger)">+${t.overtime.toFixed(1)}</span>`:'0.0'):'<span style="color:var(--text2);font-size:11px">対象外</span>'}</td>
       <td style="text-align:right;font-family:var(--mono);padding-right:8px">${t.late!=null&&t.late>0?`<span style="color:var(--warn)">-${t.late.toFixed(1)}</span>`:'—'}</td>
+      <td><input type="text" value="${r.note||''}" placeholder="備考" style="width:72px;font-size:12px" onchange="updRow(${i},'note',this.value)"></td>
       <td><span class="badge ${bCls}">${bTxt}</span></td>
       <td><button onclick="delRow(${i})" style="border:none;background:none;cursor:pointer;color:var(--text2);font-size:16px;padding:2px 3px;border-radius:4px">×</button></td>`;
     tbody.appendChild(tr);
@@ -981,9 +989,10 @@ function downloadMonth(ym) {
       ['対象年月',ym,'','所定労働時間',emp.stdHours+'h','残業対象',emp.hasOT?'あり':'なし（管理職等）'],
       [],
       ['日付','曜日','出勤','退勤','早出残業(h)','実働(h)','夕刻残業(h)','遅刻早退(h)','備考'],
-      ...dataRows,[],
-      ['出勤日数',days+'日','総実働',total.toFixed(1)+'h','早出残業',early.toFixed(1)+'h','夕刻残業',emp.hasOT?ot.toFixed(1)+'h':'対象外']
     ];
+    dataRows.forEach(row => wsData.push(row));
+    wsData.push([]);
+    wsData.push(['出勤日数',days+'日','総実働',total.toFixed(1)+'h','早出残業',early.toFixed(1)+'h','夕刻残業',emp.hasOT?ot.toFixed(1)+'h':'対象外']);
     // 出勤簿
     const atData=[
       ['出　勤　簿'],
