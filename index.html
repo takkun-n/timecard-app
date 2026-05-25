@@ -112,9 +112,26 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
 .badge-warn{background:var(--warn-bg);color:var(--warn)}
 .badge-info{background:#E6F1FB;color:#0C447C}
 .badge-gray{background:var(--surface2);color:var(--text2)}
+.badge-lock{background:#E8F5EC;color:#2D6A3F;border:1px solid #9FE1CB}
 .day-sat{color:var(--accent2);font-weight:700}
 .day-sun{color:var(--danger);font-weight:700}
 .row-new{background:#FEFDF5!important}
+
+/* Lock overlay */
+.locked-overlay{background:var(--success-bg);border:1.5px solid #9FE1CB;border-radius:8px;padding:.6rem 1rem;margin-bottom:.75rem;font-size:13px;color:var(--success);display:none;align-items:center;gap:8px}
+.locked-overlay.show{display:flex}
+.locked-overlay strong{font-weight:700}
+
+/* Paste blocked */
+.paste-area textarea.blocked{background:#FFF8F8;border-color:#EFB0B0;cursor:not-allowed;color:var(--text2)}
+
+/* Emp tab confirmed */
+.emp-tab.confirmed .dot{background:#2D6A3F!important;opacity:1!important}
+.emp-tab.confirmed::after{content:'✓';font-size:10px;font-weight:700;color:#2D6A3F;margin-left:2px}
+
+/* Guide bar */
+.guide-bar{background:#EEF4FB;border:1px solid #B5D4F4;border-radius:8px;padding:.6rem 1rem;margin-bottom:.75rem;font-size:13px;color:#0C447C;display:flex;align-items:center;gap:8px}
+.guide-bar .guide-step{background:#185FA5;color:#fff;font-size:10px;font-weight:700;border-radius:10px;padding:1px 8px;white-space:nowrap}
 
 /* Master table */
 .master-table{width:100%;border-collapse:collapse;font-size:13px}
@@ -253,11 +270,25 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
     <div class="card-head">
       <div class="card-title" id="inputCardTitle">📝 データ入力</div>
       <div style="display:flex;gap:6px">
-        <button class="btn btn-sm" onclick="addRow()">＋ 行追加</button>
+        <button class="btn btn-sm" id="addRowBtn" onclick="addRow()">＋ 行追加</button>
+        <button class="btn btn-sm btn-success" id="confirmBtn" onclick="confirmData()">✅ 確定</button>
+        <button class="btn btn-sm" id="unlockBtn" onclick="unlockData()" style="display:none">🔓 ロック解除</button>
         <button class="btn btn-sm btn-accent" onclick="saveCurrentData()">💾 保存</button>
       </div>
     </div>
     <div class="card-body">
+      <!-- 作業ガイド -->
+      <div class="guide-bar" id="guideBar">
+        <span class="guide-step" id="guideStep">STEP 1</span>
+        <span id="guideMsg">従業員タブから対象の従業員を選択してください</span>
+      </div>
+
+      <!-- 確定済みロック表示 -->
+      <div class="locked-overlay" id="lockedOverlay">
+        <span style="font-size:18px">🔒</span>
+        <span><strong id="lockedName"></strong> のデータは確定済みです。編集・上書きはできません。修正が必要な場合は「ロック解除」を押してください。</span>
+      </div>
+
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:.75rem;font-size:13px">
         <div><span style="color:var(--text2)">部署：</span><strong id="deptDisp">—</strong></div>
         <div><span style="color:var(--text2)">所定時間：</span><strong id="stdDisp">—</strong>　<span style="color:var(--text2);font-size:11px" id="otDisp"></span></div>
@@ -267,7 +298,10 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
 
       <div class="paste-area" style="margin-bottom:.5rem">
         <label style="font-size:12px;font-weight:700;color:var(--text2);display:block;margin-bottom:5px">📋 ClaudeのJSONを貼り付け → 差分追加</label>
-        <textarea id="pasteBox" placeholder='Claudeが出力したJSONをここに貼り付けてください&#10;例: [{"date":"2026-06-21","clockIn":"07:51","clockOut":"17:22","note":""}]' oninput="onPasteInput()"></textarea>
+        <textarea id="pasteBox"
+          placeholder='まず上の従業員タブで従業員を選択してから、JSONをここに貼り付けてください'
+          oninput="onPasteInput()"
+          onfocus="onPasteFocus()"></textarea>
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end">
         <button class="btn btn-sm" onclick="clearPaste()">クリア</button>
@@ -543,7 +577,6 @@ function doLogout() {
 }
 
 function initApp() {
-  // 必ず現在月を正しく設定
   currentMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
   currentEmpId = null;
   document.getElementById('yearMonth').value = currentMonth;
@@ -556,6 +589,21 @@ function initApp() {
   renderAllSummary();
   renderHistory();
   updateDlBtn();
+  updateLockUI();
+  updateGuide();
+}
+
+function selectMonth(ym) {
+  currentMonth = ym;
+  currentEmpId = null;
+  document.getElementById('yearMonth').value = ym;
+  renderRecentMonths();
+  renderEmpTabs();
+  renderTable();
+  renderAllSummary();
+  updateDlBtn();
+  updateLockUI();
+  updateGuide();
 }
 
 // ===== NAV =====
@@ -612,14 +660,22 @@ function renderEmpTabs() {
   const container = document.getElementById('empTabs');
   container.innerHTML = '';
   const monthData = state.monthData[currentMonth] || {};
+  const locks = state.locks || {};
+  const lockKey = `${currentMonth}`;
   state.empMasters.forEach(emp => {
     const hasData = monthData[emp.id] && monthData[emp.id].length > 0;
+    const isConfirmed = locks[lockKey] && locks[lockKey][emp.id];
     const btn = document.createElement('button');
-    btn.className = `emp-tab${emp.id===currentEmpId?' active':''}${hasData?' has-data':''}`;
+    btn.className = `emp-tab${emp.id===currentEmpId?' active':''}${hasData?' has-data':''}${isConfirmed?' confirmed':''}`;
     btn.innerHTML = `<span class="dot"></span>${emp.name}`;
     btn.onclick = () => selectEmp(emp.id);
     container.appendChild(btn);
   });
+}
+
+function isLocked() {
+  if(!currentEmpId || !currentMonth) return false;
+  return !!(state.locks && state.locks[currentMonth] && state.locks[currentMonth][currentEmpId]);
 }
 
 function selectEmp(empId) {
@@ -634,7 +690,97 @@ function selectEmp(empId) {
   }
   renderTable();
   calcSummary();
+  updateLockUI();
+  updateGuide();
   setStatus(getRows().length > 0 ? `✓ ${getRows().length}件のデータが保存済みです` : 'データを貼り付けてください');
+}
+
+// ===== LOCK =====
+function confirmData() {
+  if(!currentEmpId) { alert('先に従業員を選択してください'); return; }
+  if(getRows().length === 0) { alert('データがありません。先にデータを入力してください'); return; }
+  const emp = state.empMasters.find(e => e.id===currentEmpId);
+  if(!confirm(`【${emp ? emp.name : ''}】のデータを確定しますか？\n\n確定後はデータが保護され、誤上書きを防止します。\n修正が必要な場合は「ロック解除」ボタンで解除できます。`)) return;
+  if(!state.locks) state.locks = {};
+  if(!state.locks[currentMonth]) state.locks[currentMonth] = {};
+  state.locks[currentMonth][currentEmpId] = true;
+  saveState();
+  renderEmpTabs();
+  updateLockUI();
+  updateGuide();
+  toast(`${emp ? emp.name : ''}のデータを確定しました 🔒`);
+}
+
+function unlockData() {
+  if(!currentEmpId) return;
+  const emp = state.empMasters.find(e => e.id===currentEmpId);
+  if(!confirm(`【${emp ? emp.name : ''}】のロックを解除しますか？\n\nデータの編集・上書きが可能になります。`)) return;
+  if(state.locks && state.locks[currentMonth]) {
+    delete state.locks[currentMonth][currentEmpId];
+  }
+  saveState();
+  renderEmpTabs();
+  updateLockUI();
+  updateGuide();
+  toast('ロックを解除しました');
+}
+
+function updateLockUI() {
+  const locked = isLocked();
+  const emp = state.empMasters.find(e => e.id===currentEmpId);
+  // ロック表示
+  document.getElementById('lockedOverlay').classList.toggle('show', locked);
+  document.getElementById('lockedName').textContent = emp ? emp.name : '';
+  // ボタン表示
+  document.getElementById('confirmBtn').style.display = locked ? 'none' : '';
+  document.getElementById('unlockBtn').style.display = locked ? '' : 'none';
+  document.getElementById('addRowBtn').disabled = locked;
+  // 貼り付け欄
+  const pa = document.getElementById('pasteBox');
+  pa.readOnly = locked;
+  pa.classList.toggle('blocked', locked);
+  if(locked) pa.placeholder = '🔒 このデータは確定済みです。「ロック解除」を押すと編集できます。';
+  else if(!currentEmpId) pa.placeholder = 'まず上の従業員タブで従業員を選択してから、JSONをここに貼り付けてください';
+  else pa.placeholder = 'ClaudeのJSONをここに貼り付けてください\n例: [{"date":"2026-06-21","clockIn":"07:51","clockOut":"17:22","note":""}]';
+  document.getElementById('importBtn').disabled = locked || document.getElementById('pasteBox').value.trim().length < 5;
+}
+
+// ===== GUIDE BAR =====
+function updateGuide() {
+  const guideBar = document.getElementById('guideBar');
+  const guideStep = document.getElementById('guideStep');
+  const guideMsg = document.getElementById('guideMsg');
+  const locks = state.locks || {};
+  const lockKey = currentMonth;
+  const totalEmp = state.empMasters.length;
+  const confirmedCount = Object.keys((locks[lockKey] || {})).length;
+
+  if(!currentEmpId) {
+    guideStep.textContent = 'STEP 1';
+    guideStep.style.background = '#185FA5';
+    guideMsg.textContent = '👆 従業員タブから対象の従業員を選択してください';
+  } else if(isLocked()) {
+    const emp = state.empMasters.find(e => e.id===currentEmpId);
+    const nextEmp = state.empMasters.find(e => {
+      const c = locks[lockKey] || {};
+      return !c[e.id];
+    });
+    guideStep.textContent = `${confirmedCount}/${totalEmp}名 確定済`;
+    guideStep.style.background = '#2D6A3F';
+    guideMsg.textContent = nextEmp
+      ? `✅ 確定済み。次は【${nextEmp.name}】のタブを選択して入力してください`
+      : `🎉 全従業員のデータが確定しました！Excelダウンロードができます`;
+  } else if(getRows().length === 0) {
+    guideStep.textContent = 'STEP 2';
+    guideStep.style.background = '#185FA5';
+    const emp = state.empMasters.find(e => e.id===currentEmpId);
+    guideMsg.textContent = `📋 【${emp ? emp.name : ''}】のJSONデータを貼り付けて「差分追加」を押してください`;
+  } else {
+    guideStep.textContent = 'STEP 3';
+    guideStep.style.background = '#854F0B';
+    const emp = state.empMasters.find(e => e.id===currentEmpId);
+    guideMsg.textContent = `👀 【${emp ? emp.name : ''}】のデータを確認・修正し、問題なければ「✅ 確定」を押してください`;
+  }
 }
 
 function getRows() {
@@ -649,25 +795,42 @@ function setRows(rows) {
 }
 
 // ===== PASTE & DIFF IMPORT =====
+function onPasteFocus() {
+  if(!currentEmpId) {
+    document.getElementById('pasteBox').blur();
+    alert('⚠️ 先に従業員タブから対象の従業員を選択してください。\n\n選択しないとデータがどの従業員のものかわかりません。');
+    return;
+  }
+  if(isLocked()) {
+    document.getElementById('pasteBox').blur();
+    const emp = state.empMasters.find(e => e.id===currentEmpId);
+    alert(`🔒 【${emp ? emp.name : ''}】のデータは確定済みです。\n\n編集する場合は「ロック解除」ボタンを押してください。`);
+    return;
+  }
+}
+
 function onPasteInput() {
+  if(isLocked()) return;
   const v = document.getElementById('pasteBox').value.trim();
   document.getElementById('importBtn').disabled = v.length < 5;
   document.getElementById('pasteBox').classList.toggle('has-content', v.length > 5);
 }
 
 function importPaste() {
-  if(!currentEmpId) { alert('先に従業員を選択してください'); return; }
+  if(!currentEmpId) { alert('⚠️ 先に従業員タブから対象の従業員を選択してください'); return; }
+  if(isLocked()) { alert('🔒 このデータは確定済みです。「ロック解除」ボタンを押してから操作してください'); return; }
+
+  const emp = state.empMasters.find(e => e.id===currentEmpId);
   const raw = document.getElementById('pasteBox').value.trim();
+
   try {
-    const s = raw.indexOf('['), e = raw.lastIndexOf(']');
-    if(s===-1||e===-1) throw new Error('JSON配列が見つかりません');
-    const newRows = JSON.parse(raw.slice(s, e+1));
+    const s = raw.indexOf('['), e2 = raw.lastIndexOf(']');
+    if(s===-1||e2===-1) throw new Error('JSON配列が見つかりません');
+    const newRows = JSON.parse(raw.slice(s, e2+1));
     if(!Array.isArray(newRows) || newRows.length===0) throw new Error('データが空です');
 
     const existing = getRows();
     const existingDates = new Set(existing.map(r => r.date));
-
-    // 差分：既存にない日付のみ追加
     const toAdd = newRows.filter(r => !existingDates.has(r.date));
     const skipped = newRows.length - toAdd.length;
 
@@ -676,7 +839,10 @@ function importPaste() {
       return;
     }
 
-    // 日付順にマージして保存
+    // ③ 確認ダイアログ：従業員名を明示
+    const confirmMsg = `【${emp ? emp.name : '不明'}】のデータに${toAdd.length}件を追加します。\n${skipped > 0 ? `（既存データ${skipped}件はスキップ）\n` : ''}\n追加する日付：${toAdd.slice(0,5).map(r=>r.date).join('、')}${toAdd.length>5?`… 他${toAdd.length-5}件`:''}\n\nよろしいですか？`;
+    if(!confirm(confirmMsg)) return;
+
     const merged = [...existing, ...toAdd].sort((a,b) => a.date.localeCompare(b.date));
     setRows(merged);
     saveState();
@@ -868,11 +1034,11 @@ function renderTable() {
 }
 
 function updRow(i, key, val) {
+  if(isLocked()) { alert('🔒 確定済みです。「ロック解除」を押してから編集してください'); return; }
   const rows = getRows();
   if(i < 0 || i >= rows.length) return;
   rows[i][key] = val;
   delete rows[i]._new;
-  // 日付・打刻が変わったら手動上書きをクリア
   if(key==='clockIn'||key==='clockOut'||key==='date') {
     delete rows[i]._earlyOverride;
     delete rows[i]._actualOverride;
@@ -885,6 +1051,7 @@ function updRow(i, key, val) {
 }
 
 function updRowOverride(i, key, val) {
+  if(isLocked()) { alert('🔒 確定済みです。「ロック解除」を押してから編集してください'); return; }
   const rows = getRows();
   if(i < 0 || i >= rows.length) return;
   rows[i][key] = parseFloat(val) || 0;
@@ -894,10 +1061,13 @@ function updRowOverride(i, key, val) {
 }
 
 function delRow(i) {
+  if(isLocked()) { alert('🔒 確定済みです。「ロック解除」を押してから削除してください'); return; }
   const rows = getRows();
   if(i < 0 || i >= rows.length) return;
   const r = rows[i];
-  if(!confirm(`${r.date}（${getDayCell(r.date).replace(/<[^>]+>/g,'')}）のデータを削除しますか？\n出勤：${r.clockIn||'—'}　退勤：${r.clockOut||'—'}\n\nこの操作は元に戻せません。`)) return;
+  const w = getWeekday(r.date);
+  const dayStr = w >= 0 ? DAYS[w] : '';
+  if(!confirm(`${r.date}（${dayStr}）のデータを削除しますか？\n出勤：${r.clockIn||'—'}　退勤：${r.clockOut||'—'}\n\nこの操作は元に戻せません。`)) return;
   rows.splice(i, 1);
   setRows(rows);
   saveState();
