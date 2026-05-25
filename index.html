@@ -827,10 +827,10 @@ function renderEmpTabs() {
   const locks = state.locks || {};
   const lockKey = `${currentMonth}`;
   state.empMasters.forEach(emp => {
-    const hasData = monthData[emp.id] && monthData[emp.id].length > 0;
-    const isConfirmed = locks[lockKey] && locks[lockKey][emp.id];
+    const hasData = (monthData[String(emp.id)] || monthData[emp.id] || []).length > 0;
+    const isConfirmed = locks[lockKey] && (locks[lockKey][emp.id] || locks[lockKey][String(emp.id)]);
     const btn = document.createElement('button');
-    btn.className = `emp-tab${emp.id===currentEmpId?' active':''}${hasData?' has-data':''}${isConfirmed?' confirmed':''}`;
+    btn.className = `emp-tab${String(emp.id)===String(currentEmpId)?' active':''}${hasData?' has-data':''}${isConfirmed?' confirmed':''}`;
     btn.innerHTML = `<span class="dot"></span>${emp.name}`;
     btn.onclick = () => selectEmp(emp.id);
     container.appendChild(btn);
@@ -950,14 +950,14 @@ function updateGuide() {
 function getRows() {
   if(!currentEmpId || !currentMonth) return [];
   const md = state.monthData[currentMonth] || {};
-  return md[currentEmpId] || md[String(currentEmpId)] || md[Number(currentEmpId)] || [];
+  return md[currentEmpId] || md[String(currentEmpId)] || [];
 }
 
 function setRows(rows) {
   if(!currentEmpId || !currentMonth) return;
   if(!state.monthData[currentMonth]) state.monthData[currentMonth] = {};
-  // 常に数値キーで統一保存
-  state.monthData[currentMonth][currentEmpId] = rows;
+  // 文字列キーで統一（LocalStorage保存後も一致するよう）
+  state.monthData[currentMonth][String(currentEmpId)] = rows;
 }
 
 // ===== PASTE & DIFF IMPORT =====
@@ -1293,14 +1293,14 @@ function calcSummary() {
 function renderAllSummary() {
   const container = document.getElementById('allSummary');
   const monthData = state.monthData[currentMonth] || {};
-  const withData = state.empMasters.filter(e => monthData[e.id] && monthData[e.id].length>0);
+  const withData = state.empMasters.filter(e => (monthData[String(e.id)]||monthData[e.id]||[]).length>0);
   if(!withData.length) {
     container.innerHTML = `<div style="text-align:center;padding:1.5rem;color:var(--text2);font-size:13px">データを入力するとここに集計が表示されます</div>`;
     return;
   }
   container.innerHTML = '';
   withData.forEach(emp => {
-    const rows = monthData[emp.id] || [];
+    const rows = monthData[String(emp.id)]||monthData[emp.id]||[];
     let days=0, total=0, early=0, ot=0;
     rows.forEach(r => {
       if(r.clockIn&&r.clockOut) {
@@ -1326,7 +1326,7 @@ function renderAllSummary() {
 
 function updateDlBtn() {
   const monthData = state.monthData[currentMonth] || {};
-  const hasAny = state.empMasters.some(e => monthData[e.id] && monthData[e.id].length>0);
+  const hasAny = state.empMasters.some(e => (monthData[String(e.id)]||monthData[e.id]||[]).length>0);
   document.getElementById('dlAllBtn').disabled = !hasAny;
 }
 
@@ -1381,14 +1381,14 @@ function downloadAll() { downloadMonth(currentMonth); }
 
 function downloadMonth(ym) {
   const monthData = state.monthData[ym] || {};
-  const withData = state.empMasters.filter(e => monthData[e.id] && monthData[e.id].length>0);
+  const withData = state.empMasters.filter(e => (monthData[String(e.id)]||monthData[e.id]||[]).length>0);
   if(!withData.length) { alert('データがありません'); return; }
   const wb = XLSX.utils.book_new();
 
   // サマリー
   const sumData = [['氏名','部署','対象年月','出勤日数','総実働(h)','早出残業(h)','夕刻残業(h)','遅刻早退(h)','要確認','残業対象']];
   withData.forEach(emp => {
-    const rows = monthData[emp.id]||[];
+    const rows = monthData[String(emp.id)]||monthData[emp.id]||[];
     let days=0,total=0,early=0,ot=0,late=0,issues=0;
     rows.forEach(r=>{
       if(r.clockIn&&r.clockOut){days++;const t=calcTimes(r.clockIn,r.clockOut,emp);if(t.actual!=null){total+=t.actual;early+=t.early||0;if(t.overtime!=null)ot+=t.overtime;if(t.late!=null)late+=t.late;}}else{issues++;}
@@ -1404,7 +1404,7 @@ function downloadMonth(ym) {
 
   // 個人別
   withData.forEach(emp => {
-    const rawRows = monthData[emp.id]||[];
+    const rawRows = monthData[String(emp.id)]||monthData[emp.id]||[];
     // 21日始まりでソート
     const rows = [...rawRows].sort((a,b)=>sortKey21(a.date).localeCompare(sortKey21(b.date)));
     let days=0,total=0,early=0,ot=0,late=0;
@@ -1622,7 +1622,8 @@ function getPrevMonth(ym) {
 }
 
 function calcEmpSummary(empId, ym) {
-  const rows = (state.monthData[ym] || {})[empId] || [];
+  const md = state.monthData[ym] || {};
+  const rows = md[String(empId)] || md[empId] || [];
   const emp = state.empMasters.find(e => e.id === empId);
   let days=0, total=0, early=0, ot=0, late=0, issues=0;
   rows.forEach(r => {
@@ -1853,24 +1854,24 @@ function renderCalendar() {
   tabContainer.innerHTML = '';
   const monthData = state.monthData[ym] || {};
 
-  // monthDataのキーは文字列の可能性があるので両方チェック
+  // monthDataのキーは文字列なので文字列で統一
   function getEmpRows(empId) {
-    return monthData[empId] || monthData[String(empId)] || monthData[Number(empId)] || [];
+    return monthData[String(empId)] || monthData[empId] || [];
   }
 
   // データがある従業員を優先して初期選択
   if(!calEmpId) {
     const firstWithData = state.empMasters.find(e => getEmpRows(e.id).length > 0);
-    if(firstWithData) calEmpId = firstWithData.id;
-    else if(state.empMasters.length > 0) calEmpId = state.empMasters[0].id;
+    if(firstWithData) calEmpId = String(firstWithData.id);
+    else if(state.empMasters.length > 0) calEmpId = String(state.empMasters[0].id);
   }
 
   state.empMasters.forEach(emp => {
     const hasData = getEmpRows(emp.id).length > 0;
     const btn = document.createElement('button');
-    btn.className = `emp-tab${emp.id===calEmpId?' active':''}${hasData?' has-data':''}`;
+    btn.className = `emp-tab${String(emp.id)===String(calEmpId)?' active':''}${hasData?' has-data':''}`;
     btn.innerHTML = `<span class="dot"></span>${emp.name}`;
-    btn.onclick = () => { calEmpId = emp.id; renderCalendar(); };
+    btn.onclick = () => { calEmpId = String(emp.id); renderCalendar(); };
     tabContainer.appendChild(btn);
   });
 
@@ -1879,7 +1880,7 @@ function renderCalendar() {
     return;
   }
 
-  const emp = state.empMasters.find(e => e.id === calEmpId);
+  const emp = state.empMasters.find(e => String(e.id) === String(calEmpId));
   const rows = [...getEmpRows(calEmpId)];
   const rowMap = {};
   rows.forEach(r => { rowMap[r.date] = r; });
