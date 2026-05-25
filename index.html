@@ -949,12 +949,14 @@ function updateGuide() {
 
 function getRows() {
   if(!currentEmpId || !currentMonth) return [];
-  return (state.monthData[currentMonth] || {})[currentEmpId] || [];
+  const md = state.monthData[currentMonth] || {};
+  return md[currentEmpId] || md[String(currentEmpId)] || md[Number(currentEmpId)] || [];
 }
 
 function setRows(rows) {
   if(!currentEmpId || !currentMonth) return;
   if(!state.monthData[currentMonth]) state.monthData[currentMonth] = {};
+  // 常に数値キーで統一保存
   state.monthData[currentMonth][currentEmpId] = rows;
 }
 
@@ -1837,7 +1839,6 @@ let calEmpId = null;
 let calLastMonth = null;
 
 function renderCalendar() {
-  // 勤怠入力の月と同期（カレンダータブを開いたとき）
   const ym = document.getElementById('calMonth').value || currentMonth;
   document.getElementById('calMonth').value = ym;
   const [y, m] = ym.split('-').map(Number);
@@ -1848,20 +1849,24 @@ function renderCalendar() {
     calLastMonth = ym;
   }
 
-  // 従業員タブ：データがある従業員を先に、なくてもすべて表示
   const tabContainer = document.getElementById('calEmpTabs');
   tabContainer.innerHTML = '';
   const monthData = state.monthData[ym] || {};
 
+  // monthDataのキーは文字列の可能性があるので両方チェック
+  function getEmpRows(empId) {
+    return monthData[empId] || monthData[String(empId)] || monthData[Number(empId)] || [];
+  }
+
   // データがある従業員を優先して初期選択
   if(!calEmpId) {
-    const firstWithData = state.empMasters.find(e => (monthData[e.id]||[]).length > 0);
+    const firstWithData = state.empMasters.find(e => getEmpRows(e.id).length > 0);
     if(firstWithData) calEmpId = firstWithData.id;
     else if(state.empMasters.length > 0) calEmpId = state.empMasters[0].id;
   }
 
   state.empMasters.forEach(emp => {
-    const hasData = (monthData[emp.id] || []).length > 0;
+    const hasData = getEmpRows(emp.id).length > 0;
     const btn = document.createElement('button');
     btn.className = `emp-tab${emp.id===calEmpId?' active':''}${hasData?' has-data':''}`;
     btn.innerHTML = `<span class="dot"></span>${emp.name}`;
@@ -1875,7 +1880,7 @@ function renderCalendar() {
   }
 
   const emp = state.empMasters.find(e => e.id === calEmpId);
-  const rows = [...(monthData[calEmpId] || [])];
+  const rows = [...getEmpRows(calEmpId)];
   const rowMap = {};
   rows.forEach(r => { rowMap[r.date] = r; });
 
