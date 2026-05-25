@@ -737,79 +737,159 @@ function toMin(t) { if(!t) return null; const[h,m]=t.split(':').map(Number); ret
 function floor30(h) { return Math.floor(h*2)/2; }
 
 function calcTimes(clockIn, clockOut, emp) {
-  const r = {actual:null, early:null, overtime:null, late:null};
-  if(!clockIn || !clockOut) return r;
-  const inM=toMin(clockIn), outM=toMin(clockOut);
-  const startM=toMin(state.cfg.workStart), endM=toMin(state.cfg.workEnd);
-  const earlyM=toMin(state.cfg.earlyStart), otStartM=toMin(state.cfg.otStart);
+  const r = {actual:null, early:0, overtime:0, late:0};
+  const stdHours = emp ? parseFloat(emp.stdHours)||8 : 8;
 
+  if(!clockIn || !clockOut) return r;
+
+  const inM  = toMin(clockIn);
+  const outM = toMin(clockOut);
+  const startM   = toMin(state.cfg.workStart);  // 08:00
+  const endM     = toMin(state.cfg.workEnd);     // 17:00
+  const earlyM   = toMin(state.cfg.earlyStart);  // 07:00
+  const otStartM = toMin(state.cfg.otStart);     // 17:10
+
+  // 休憩：実際に出勤中に重なる休憩時間のみ差し引く
   let breakMin = 0;
   state.cfg.breaks.forEach(b => {
-    const bs=toMin(b.from), be=toMin(b.to);
-    const oS=Math.max(inM,bs), oE=Math.min(outM,be);
-    if(oE>oS) breakMin += oE-oS;
+    const bs = toMin(b.from), be = toMin(b.to);
+    const oS = Math.max(inM, bs), oE = Math.min(outM, be);
+    if(oE > oS) breakMin += oE - oS;
   });
 
-  r.early = (inM < startM && inM >= earlyM) ? floor30((startM-inM)/60) : 0;
-  r.late = inM > startM ? floor30((inM-startM)/60) : (outM < endM ? floor30((endM-outM)/60) : 0);
-
-  const totalMin = outM - inM - breakMin;
-  r.actual = Math.max(0, floor30(totalMin/60));
-
-  if(emp && emp.hasOT) {
-    r.overtime = outM > otStartM ? floor30((outM-otStartM)/60) : 0;
-  } else {
-    r.overtime = null;
+  // 早出残業：earlyStart〜workStart の間に出勤した分（30分単位切り捨て）
+  if(inM < startM && inM >= earlyM) {
+    r.early = floor30((startM - inM) / 60);
   }
+
+  // 遅刻：workStart より後に出勤（30分単位切り捨て）
+  // 早退：workEnd より前に退勤（30分単位切り捨て）
+  if(inM > startM) {
+    r.late = floor30((inM - startM) / 60);
+  } else if(outM < endM) {
+    r.late = floor30((endM - outM) / 60);
+  }
+
+  // 実働時間 = 出退勤差 - 休憩
+  const totalMin = outM - inM - breakMin;
+  r.actual = Math.max(0, floor30(totalMin / 60));
+
+  // 残業対象外：残業=0、実働は所定時間固定（遅早・有休がなければ）
+  if(emp && !emp.hasOT) {
+    r.overtime = 0;
+    // 遅刻・早退・有休なし → 実働を所定時間に固定
+    if(r.late === 0) {
+      r.actual = stdHours;
+    }
+  } else {
+    // 残業対象あり：otStart以降を残業（30分単位切り捨て）
+    r.overtime = outM > otStartM ? floor30((outM - otStartM) / 60) : 0;
+  }
+
   return r;
+}
+
+// 日付を21日始まりでソートするキー
+function sortKey21(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  if(isNaN(d)) return dateStr;
+  const day = d.getDate();
+  // 21日以降 → 0〜9、20日以前 → 10〜29 として並べる
+  const order = day >= 21 ? day - 21 : day + 10;
+  return String(order).padStart(2,'0') + '-' + dateStr;
+}
+
+function getSortedRows() {
+  const rows = getRows();
+  return [...rows].sort((a, b) => sortKey21(a.date).localeCompare(sortKey21(b.date)));
 }
 
 // ===== TABLE =====
 function getDayCell(dateStr) {
-  const d = new Date(dateStr+'T00:00:00');
-  if(isNaN(d)) return '';
+  if(!dateStr || dateStr.length < 10) return '';
+  // タイムゾーンの影響を受けないよう年月日を直接パース
+  const parts = dateStr.split('-');
+  if(parts.length < 3) return '';
+  const d = new Date(parseInt(parts[0]), parseInt(parts[1])-1, parseInt(parts[2]));
+  if(isNaN(d.getTime())) return '';
   const w = d.getDay();
   return `<span class="${w===0?'day-sun':w===6?'day-sat':''}">${DAYS[w]}</span>`;
 }
 
 function renderTable() {
-  const rows = getRows();
+  const sortedRows = getSortedRows();
+  const rawRows = getRows();
   const emp = state.empMasters.find(e => e.id===currentEmpId);
   const tbody = document.getElementById('tableBody');
   tbody.innerHTML = '';
-  if(!currentEmpId || rows.length===0) {
+  if(!currentEmpId || rawRows.length===0) {
     tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:1.5rem;color:var(--text2)">データがありません</td></tr>`;
     return;
   }
-  rows.forEach((r,i) => {
+  sortedRows.forEach((r) => {
+    // rawRowsの中のインデックスを特定（削除・更新に使用）
+    const rawIdx = rawRows.findIndex(rr => rr.date === r.date);
     const t = calcTimes(r.clockIn, r.clockOut, emp);
+    // 手動上書き値があればそちらを優先
+    const earlyVal  = r._earlyOverride  != null ? r._earlyOverride  : (t.early  != null ? t.early  : 0);
+    const actualVal = r._actualOverride != null ? r._actualOverride : (t.actual != null ? t.actual : 0);
+    const otVal     = r._otOverride     != null ? r._otOverride     : (t.overtime != null ? t.overtime : 0);
+    const lateVal   = r._lateOverride   != null ? r._lateOverride   : (t.late   != null ? t.late   : 0);
+
     const warn = !r.clockIn || !r.clockOut;
-    const isNew = r._new;
     const hasNote = r.note && r.note !== '';
     const bTxt = hasNote ? r.note : warn ? '要確認' : '正常';
     const bCls = r.note==='休日出勤'?'badge-info': r.note==='休日'?'badge-gray': warn?'badge-warn':'badge-ok';
+    const isNew = r._new;
     const tr = document.createElement('tr');
     if(isNew) tr.className = 'row-new';
+
+    // 残業対象外の色設定
+    const otDisplay = !emp || !emp.hasOT
+      ? `<input type="number" value="0" step="0.5" style="width:50px;text-align:right;font-family:var(--mono);background:var(--surface2);color:var(--text2)" readonly tabindex="-1">`
+      : `<input type="number" value="${otVal.toFixed(1)}" step="0.5" style="width:50px;text-align:right;font-family:var(--mono)${otVal>0?';color:var(--danger)':''}" onchange="updRowOverride(${rawIdx},'_otOverride',this.value)">`;
+
+    const lateDisplay = lateVal > 0
+      ? `<input type="number" value="${lateVal.toFixed(1)}" step="0.5" style="width:50px;text-align:right;font-family:var(--mono);color:var(--warn)" onchange="updRowOverride(${rawIdx},'_lateOverride',this.value)">`
+      : `<input type="number" value="0" step="0.5" style="width:50px;text-align:right;font-family:var(--mono)" onchange="updRowOverride(${rawIdx},'_lateOverride',this.value)">`;
+
     tr.innerHTML = `
-      <td><input type="text" value="${r.date||''}" style="width:96px;font-size:12px" onchange="updRow(${i},'date',this.value)"></td>
+      <td><input type="text" value="${r.date||''}" style="width:96px;font-size:12px" onchange="updRow(${rawIdx},'date',this.value)"></td>
       <td>${getDayCell(r.date)}</td>
-      <td><input type="text" value="${r.clockIn||''}" placeholder="08:00" style="width:56px" onchange="updRow(${i},'clockIn',this.value)"></td>
-      <td><input type="text" value="${r.clockOut||''}" placeholder="17:00" style="width:56px" onchange="updRow(${i},'clockOut',this.value)"></td>
-      <td style="text-align:right;font-family:var(--mono);padding-right:8px">${t.early!=null?t.early.toFixed(1):'—'}</td>
-      <td style="text-align:right;font-family:var(--mono);padding-right:8px">${t.actual!=null?t.actual.toFixed(1):'—'}</td>
-      <td style="text-align:right;font-family:var(--mono);padding-right:8px">${t.overtime!=null?(t.overtime>0?`<span style="color:var(--danger)">+${t.overtime.toFixed(1)}</span>`:'0.0'):'<span style="color:var(--text2);font-size:11px">対象外</span>'}</td>
-      <td style="text-align:right;font-family:var(--mono);padding-right:8px">${t.late!=null&&t.late>0?`<span style="color:var(--warn)">-${t.late.toFixed(1)}</span>`:'—'}</td>
-      <td><input type="text" value="${r.note||''}" placeholder="備考" style="width:72px;font-size:12px" onchange="updRow(${i},'note',this.value)"></td>
+      <td><input type="text" value="${r.clockIn||''}" placeholder="08:00" style="width:54px" onchange="updRow(${rawIdx},'clockIn',this.value)"></td>
+      <td><input type="text" value="${r.clockOut||''}" placeholder="17:00" style="width:54px" onchange="updRow(${rawIdx},'clockOut',this.value)"></td>
+      <td><input type="number" value="${earlyVal.toFixed(1)}" step="0.5" style="width:50px;text-align:right;font-family:var(--mono)" onchange="updRowOverride(${rawIdx},'_earlyOverride',this.value)"></td>
+      <td><input type="number" value="${actualVal.toFixed(1)}" step="0.5" style="width:50px;text-align:right;font-family:var(--mono)" onchange="updRowOverride(${rawIdx},'_actualOverride',this.value)"></td>
+      <td>${otDisplay}</td>
+      <td>${lateDisplay}</td>
+      <td><input type="text" value="${r.note||''}" placeholder="備考" style="width:70px;font-size:12px" onchange="updRow(${rawIdx},'note',this.value)"></td>
       <td><span class="badge ${bCls}">${bTxt}</span></td>
-      <td><button onclick="delRow(${i})" style="border:none;background:none;cursor:pointer;color:var(--text2);font-size:16px;padding:2px 3px;border-radius:4px">×</button></td>`;
+      <td><button onclick="delRow(${rawIdx})" class="btn btn-sm btn-danger" style="padding:3px 8px;font-size:11px">削除</button></td>`;
     tbody.appendChild(tr);
   });
 }
 
 function updRow(i, key, val) {
   const rows = getRows();
+  if(i < 0 || i >= rows.length) return;
   rows[i][key] = val;
   delete rows[i]._new;
+  // 日付・打刻が変わったら手動上書きをクリア
+  if(key==='clockIn'||key==='clockOut'||key==='date') {
+    delete rows[i]._earlyOverride;
+    delete rows[i]._actualOverride;
+    delete rows[i]._otOverride;
+    delete rows[i]._lateOverride;
+  }
+  setRows(rows);
+  saveState();
+  renderTable(); calcSummary(); renderAllSummary();
+}
+
+function updRowOverride(i, key, val) {
+  const rows = getRows();
+  if(i < 0 || i >= rows.length) return;
+  rows[i][key] = parseFloat(val) || 0;
   setRows(rows);
   saveState();
   renderTable(); calcSummary(); renderAllSummary();
@@ -817,6 +897,9 @@ function updRow(i, key, val) {
 
 function delRow(i) {
   const rows = getRows();
+  if(i < 0 || i >= rows.length) return;
+  const r = rows[i];
+  if(!confirm(`${r.date}（${getDayCell(r.date).replace(/<[^>]+>/g,'')}）のデータを削除しますか？\n出勤：${r.clockIn||'—'}　退勤：${r.clockOut||'—'}\n\nこの操作は元に戻せません。`)) return;
   rows.splice(i, 1);
   setRows(rows);
   saveState();
@@ -842,18 +925,22 @@ function calcSummary() {
     if(r.clockIn && r.clockOut) {
       days++;
       const t = calcTimes(r.clockIn, r.clockOut, emp);
-      if(t.actual!=null) total+=t.actual;
-      if(t.early!=null) early+=t.early;
-      if(t.overtime!=null) ot+=t.overtime;
-      if(t.late!=null) late+=t.late;
+      const earlyVal  = r._earlyOverride  != null ? r._earlyOverride  : (t.early  || 0);
+      const actualVal = r._actualOverride != null ? r._actualOverride : (t.actual || 0);
+      const otVal     = r._otOverride     != null ? r._otOverride     : (t.overtime || 0);
+      const lateVal   = r._lateOverride   != null ? r._lateOverride   : (t.late   || 0);
+      total += actualVal;
+      early += earlyVal;
+      ot    += otVal;
+      late  += lateVal;
     } else { issues++; }
   });
-  document.getElementById('s-days').innerHTML = days+'<span class="s-unit"> 日</span>';
+  document.getElementById('s-days').innerHTML  = days+'<span class="s-unit"> 日</span>';
   document.getElementById('s-total').innerHTML = total.toFixed(1)+'<span class="s-unit"> h</span>';
   document.getElementById('s-early').innerHTML = early.toFixed(1)+'<span class="s-unit"> h</span>';
-  document.getElementById('s-ot').innerHTML = ot.toFixed(1)+'<span class="s-unit"> h</span>';
-  document.getElementById('s-late').innerHTML = late>0?late.toFixed(1)+'<span class="s-unit"> h</span>':'—';
-  document.getElementById('s-issues').innerHTML = issues+'<span class="s-unit"> 件</span>';
+  document.getElementById('s-ot').innerHTML    = ot.toFixed(1)+'<span class="s-unit"> h</span>';
+  document.getElementById('s-late').innerHTML  = late>0?late.toFixed(1)+'<span class="s-unit"> h</span>':'—';
+  document.getElementById('s-issues').innerHTML= issues+'<span class="s-unit"> 件</span>';
 }
 
 function renderAllSummary() {
@@ -970,18 +1057,25 @@ function downloadMonth(ym) {
 
   // 個人別
   withData.forEach(emp => {
-    const rows = monthData[emp.id]||[];
+    const rawRows = monthData[emp.id]||[];
+    // 21日始まりでソート
+    const rows = [...rawRows].sort((a,b)=>sortKey21(a.date).localeCompare(sortKey21(b.date)));
     let days=0,total=0,early=0,ot=0,late=0;
     const dataRows = rows.map(r=>{
-      const d=new Date(r.date+'T00:00:00');
-      const dj=isNaN(d)?'':DAYS[d.getDay()];
+      const parts = r.date ? r.date.split('-') : [];
+      const d = parts.length===3 ? new Date(parseInt(parts[0]),parseInt(parts[1])-1,parseInt(parts[2])) : new Date('invalid');
+      const dj=isNaN(d.getTime())?'':DAYS[d.getDay()];
       const t=calcTimes(r.clockIn,r.clockOut,emp);
-      if(r.clockIn&&r.clockOut&&t.actual!=null){days++;total+=t.actual;early+=t.early||0;if(t.overtime!=null)ot+=t.overtime;if(t.late!=null)late+=t.late;}
+      const earlyVal  = r._earlyOverride  != null ? r._earlyOverride  : (t.early  || 0);
+      const actualVal = r._actualOverride != null ? r._actualOverride : (t.actual || 0);
+      const otVal     = r._otOverride     != null ? r._otOverride     : (t.overtime || 0);
+      const lateVal   = r._lateOverride   != null ? r._lateOverride   : (t.late   || 0);
+      if(r.clockIn&&r.clockOut){days++;total+=actualVal;early+=earlyVal;ot+=otVal;late+=lateVal;}
       return [r.date,dj,r.clockIn||'',r.clockOut||'',
-        t.early!=null?parseFloat(t.early.toFixed(2)):'',
-        t.actual!=null?parseFloat(t.actual.toFixed(2)):'',
-        t.overtime!=null?parseFloat(t.overtime.toFixed(2)):emp.hasOT?'':'対象外',
-        t.late!=null&&t.late>0?parseFloat(t.late.toFixed(2)):'',
+        parseFloat(earlyVal.toFixed(2)),
+        parseFloat(actualVal.toFixed(2)),
+        emp.hasOT?parseFloat(otVal.toFixed(2)):'対象外',
+        lateVal>0?parseFloat(lateVal.toFixed(2)):'',
         r.note||(!r.clockIn||!r.clockOut?'要確認':'正常')];
     });
     const wsData=[
@@ -993,7 +1087,7 @@ function downloadMonth(ym) {
     dataRows.forEach(row => wsData.push(row));
     wsData.push([]);
     wsData.push(['出勤日数',days+'日','総実働',total.toFixed(1)+'h','早出残業',early.toFixed(1)+'h','夕刻残業',emp.hasOT?ot.toFixed(1)+'h':'対象外']);
-    // 出勤簿
+    // 出勤簿（21日始まり順）
     const atData=[
       ['出　勤　簿'],
       ['氏名',emp.name,'部署',emp.dept,'対象年月',ym],
@@ -1001,13 +1095,16 @@ function downloadMonth(ym) {
       ['日','曜','出勤欠勤','早出残業','遅刻早退','摘要'],
     ];
     rows.forEach(r=>{
-      const d=new Date(r.date+'T00:00:00');
-      const dj=isNaN(d)?'':DAYS[d.getDay()];
-      const day=isNaN(d)?'':d.getDate();
+      const parts = r.date ? r.date.split('-') : [];
+      const d = parts.length===3 ? new Date(parseInt(parts[0]),parseInt(parts[1])-1,parseInt(parts[2])) : new Date('invalid');
+      const dj=isNaN(d.getTime())?'':DAYS[d.getDay()];
+      const day=isNaN(d.getTime())?'':d.getDate();
       const t=calcTimes(r.clockIn,r.clockOut,emp);
+      const earlyVal = r._earlyOverride != null ? r._earlyOverride : (t.early||0);
+      const lateVal  = r._lateOverride  != null ? r._lateOverride  : (t.late ||0);
       atData.push([day,dj,r.clockIn||r.clockOut?'出':'',
-        t.early&&t.early>0?t.early.toFixed(1):'',
-        t.late&&t.late>0?'△'+t.late.toFixed(1):'',r.note||'']);
+        earlyVal>0?earlyVal.toFixed(1):'',
+        lateVal>0?'△'+lateVal.toFixed(1):'',r.note||'']);
     });
     atData.push([]);
     atData.push(['計',days+'日','','早出:'+early.toFixed(1)+'h','遅早:'+late.toFixed(1)+'h','']);
