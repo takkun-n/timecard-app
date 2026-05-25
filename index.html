@@ -221,6 +221,7 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
 
 <div class="nav-tabs">
   <div class="nav-tab active" onclick="showPage('attendance')">📋 勤怠入力</div>
+  <div class="nav-tab" onclick="showPage('check')">🔍 月次チェック</div>
   <div class="nav-tab" onclick="showPage('history')">📅 月別履歴</div>
   <div class="nav-tab" onclick="showPage('master')">👥 従業員マスター</div>
   <div class="nav-tab" onclick="showPage('dept')">🏢 部署マスター</div>
@@ -365,6 +366,31 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
         <thead><tr><th>年月</th><th>従業員数</th><th>総出勤日数</th><th>操作</th></tr></thead>
         <tbody id="historyBody"></tbody>
       </table>
+    </div>
+  </div>
+</div>
+
+<!-- ===== CHECK ===== -->
+<div class="page" id="page-check">
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">🔍 月次チェック・前月比較</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span style="font-size:12px;color:var(--text2)">対象月：</span>
+        <input type="month" id="checkMonth" style="border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:13px;font-family:'Noto Sans JP',sans-serif" onchange="renderCheck()">
+        <button class="btn btn-sm btn-success" onclick="downloadCheckExcel()">⬇ チェック表Excel</button>
+      </div>
+    </div>
+    <div class="card-body" style="padding:.75rem 1.25rem">
+      <!-- 凡例 -->
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:1rem;font-size:12px;align-items:center">
+        <span style="color:var(--text2);font-weight:500">判定：</span>
+        <span><span class="badge badge-ok">正常</span> 前月比±20%以内</span>
+        <span><span class="badge badge-warn">要注意</span> 前月比±20〜40%</span>
+        <span><span class="badge" style="background:var(--danger-bg);color:var(--danger)">要確認</span> 前月比±40%超・打刻漏れあり</span>
+        <span><span class="badge badge-gray">データなし</span> 前月データ未入力</span>
+      </div>
+      <div id="checkBody"></div>
     </div>
   </div>
 </div>
@@ -608,9 +634,10 @@ function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
-  const tabs = {attendance:0,history:1,master:2,dept:3,settings:4};
+  const tabs = {attendance:0,check:1,history:2,master:3,dept:4,settings:5};
   document.querySelectorAll('.nav-tab')[tabs[name]].classList.add('active');
   if(name==='history') renderHistory();
+  if(name==='check') renderCheck();
 }
 
 // ===== MONTH =====
@@ -1444,7 +1471,226 @@ function importData(input){
   input.value='';
 }
 
-// ===== HELPERS =====
+// ===== MONTHLY CHECK =====
+function getPrevMonth(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  return m === 1
+    ? `${y-1}-12`
+    : `${y}-${String(m-1).padStart(2,'0')}`;
+}
+
+function calcEmpSummary(empId, ym) {
+  const rows = (state.monthData[ym] || {})[empId] || [];
+  const emp = state.empMasters.find(e => e.id === empId);
+  let days=0, total=0, early=0, ot=0, late=0, issues=0;
+  rows.forEach(r => {
+    if(r.clockIn && r.clockOut) {
+      days++;
+      const t = calcTimes(r.clockIn, r.clockOut, emp);
+      const earlyVal  = r._earlyOverride  != null ? r._earlyOverride  : (t.early  || 0);
+      const actualVal = r._actualOverride != null ? r._actualOverride : (t.actual || 0);
+      const otVal     = r._otOverride     != null ? r._otOverride     : (t.overtime || 0);
+      const lateVal   = r._lateOverride   != null ? r._lateOverride   : (t.late   || 0);
+      total += actualVal; early += earlyVal; ot += otVal; late += lateVal;
+    } else { issues++; }
+  });
+  return { days, total, early, ot, late, issues, hasData: rows.length > 0 };
+}
+
+function checkLevel(curr, prev, key) {
+  if(!prev.hasData) return 'nodata';
+  if(prev[key] === 0 && curr[key] === 0) return 'ok';
+  if(prev[key] === 0) return curr[key] > 0 ? 'warn' : 'ok';
+  const ratio = Math.abs(curr[key] - prev[key]) / prev[key];
+  if(ratio <= 0.20) return 'ok';
+  if(ratio <= 0.40) return 'warn';
+  return 'danger';
+}
+
+function levelBadge(level, text) {
+  const map = {
+    ok:     'badge-ok',
+    warn:   'badge-warn',
+    danger: 'badge badge-danger-custom',
+    nodata: 'badge-gray'
+  };
+  const labels = { ok:'正常', warn:'要注意', danger:'要確認', nodata:'前月なし' };
+  const cls = level === 'danger'
+    ? 'badge" style="background:var(--danger-bg);color:var(--danger)'
+    : map[level];
+  return `<span class="badge ${cls}">${labels[level]}</span>`;
+}
+
+function diffArrow(curr, prev, key, unit='h') {
+  if(!prev.hasData || prev[key] == null) return '<span style="color:var(--text2)">—</span>';
+  const d = curr[key] - prev[key];
+  const sign = d > 0 ? '+' : '';
+  const color = d > 0 ? 'var(--danger)' : d < 0 ? 'var(--accent2)' : 'var(--text2)';
+  return `<span style="color:${color};font-family:var(--mono);font-size:12px">${sign}${d.toFixed(1)}${unit}</span>`;
+}
+
+function renderCheck() {
+  const ym = document.getElementById('checkMonth').value || currentMonth;
+  document.getElementById('checkMonth').value = ym;
+  const prevYm = getPrevMonth(ym);
+  const container = document.getElementById('checkBody');
+
+  const withData = state.empMasters.filter(e =>
+    ((state.monthData[ym] || {})[e.id] || []).length > 0 ||
+    ((state.monthData[prevYm] || {})[e.id] || []).length > 0
+  );
+
+  if(!withData.length) {
+    container.innerHTML = `<div style="text-align:center;padding:2rem;color:var(--text2)">対象月またはその前月のデータがありません</div>`;
+    return;
+  }
+
+  // 全体アラートサマリー
+  let dangerCount=0, warnCount=0;
+  withData.forEach(emp => {
+    const curr = calcEmpSummary(emp.id, ym);
+    const prev = calcEmpSummary(emp.id, prevYm);
+    ['days','total','ot','late'].forEach(k => {
+      const lv = checkLevel(curr, prev, k);
+      if(lv === 'danger') dangerCount++;
+      else if(lv === 'warn') warnCount++;
+    });
+    if(curr.issues > 0) dangerCount++;
+  });
+
+  let alertHtml = '';
+  if(dangerCount > 0) {
+    alertHtml = `<div style="background:var(--danger-bg);border:1px solid #EFB0B0;border-radius:8px;padding:.75rem 1rem;margin-bottom:1rem;font-size:13px;color:var(--danger)">
+      ⚠️ <strong>${dangerCount}件の要確認項目</strong>があります。給与計算前に必ず確認してください。</div>`;
+  } else if(warnCount > 0) {
+    alertHtml = `<div style="background:var(--warn-bg);border:1px solid #EF9F27;border-radius:8px;padding:.75rem 1rem;margin-bottom:1rem;font-size:13px;color:var(--warn)">
+      ⚠️ <strong>${warnCount}件の要注意項目</strong>があります。念のため確認してください。</div>`;
+  } else {
+    alertHtml = `<div style="background:var(--success-bg);border:1px solid #9FE1CB;border-radius:8px;padding:.75rem 1rem;margin-bottom:1rem;font-size:13px;color:var(--success)">
+      ✅ 全員のデータに大きな異常はありません。給与計算に進んでください。</div>`;
+  }
+
+  // 個人別カード
+  let cardsHtml = '';
+  withData.forEach(emp => {
+    const curr = calcEmpSummary(emp.id, ym);
+    const prev = calcEmpSummary(emp.id, prevYm);
+
+    const checks = [
+      { label:'出勤日数', key:'days', unit:'日', curr:curr.days, prev:prev.days },
+      { label:'総実働時間', key:'total', unit:'h', curr:curr.total, prev:prev.total },
+      { label:'早出残業', key:'early', unit:'h', curr:curr.early, prev:prev.early },
+      { label:'夕刻残業', key:'ot', unit:'h', curr:curr.ot, prev:prev.ot },
+      { label:'遅刻早退', key:'late', unit:'h', curr:curr.late, prev:prev.late },
+    ];
+
+    const hasIssues = curr.issues > 0;
+    const levels = checks.map(c => checkLevel(curr, prev, c.key));
+    const worstLevel = levels.includes('danger') || hasIssues ? 'danger'
+      : levels.includes('warn') ? 'warn' : 'ok';
+
+    const cardBorder = worstLevel === 'danger' ? 'border:1.5px solid #EFB0B0'
+      : worstLevel === 'warn' ? 'border:1.5px solid #EF9F27'
+      : 'border:1px solid var(--border)';
+
+    let rowsHtml = checks.map((c,i) => {
+      const lv = levels[i];
+      const currVal = c.key === 'days' ? c.curr + c.unit : c.curr.toFixed(1) + c.unit;
+      const prevVal = !prev.hasData ? '—' : (c.key === 'days' ? c.prev + c.unit : c.prev.toFixed(1) + c.unit);
+      const arrow = c.key === 'days'
+        ? (prev.hasData ? `<span style="color:${c.curr-c.prev>0?'var(--danger)':c.curr-c.prev<0?'var(--accent2)':'var(--text2)'};font-size:12px;font-family:var(--mono)">${c.curr-c.prev>0?'+':''}${c.curr-c.prev}${c.unit}</span>` : '—')
+        : diffArrow(curr, prev, c.key, c.unit);
+      return `<tr style="border-bottom:0.5px solid var(--border)">
+        <td style="padding:5px 8px;font-size:12px;color:var(--text2)">${c.label}</td>
+        <td style="padding:5px 8px;font-size:13px;font-family:var(--mono);text-align:right">${currVal}</td>
+        <td style="padding:5px 8px;font-size:12px;text-align:right;color:var(--text2)">${prevVal}</td>
+        <td style="padding:5px 8px;text-align:right">${arrow}</td>
+        <td style="padding:5px 8px;text-align:center">${levelBadge(lv,'')}</td>
+      </tr>`;
+    }).join('');
+
+    if(hasIssues) {
+      rowsHtml += `<tr style="background:var(--danger-bg)">
+        <td colspan="5" style="padding:6px 8px;font-size:12px;color:var(--danger)">
+          ⚠️ 打刻漏れ・未入力が <strong>${curr.issues}件</strong> あります。確認してください。
+        </td></tr>`;
+    }
+
+    cardsHtml += `
+    <div style="${cardBorder};border-radius:8px;margin-bottom:.75rem;overflow:hidden;background:var(--surface)">
+      <div style="background:var(--surface2);padding:.6rem 1rem;display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:13px;font-weight:700">${emp.name}
+          <span style="font-size:11px;font-weight:400;color:var(--text2);margin-left:8px">${emp.dept||''} / ${emp.empType==='part'?'パート':'正社員'} / 所定${emp.stdHours}h</span>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <span style="font-size:11px;color:var(--text2)">${prevYm}→${ym}</span>
+          ${levelBadge(worstLevel,'')}
+        </div>
+      </div>
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="background:var(--surface2);border-bottom:1px solid var(--border)">
+          <th style="padding:5px 8px;font-size:10px;text-align:left;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">項目</th>
+          <th style="padding:5px 8px;font-size:10px;text-align:right;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">当月</th>
+          <th style="padding:5px 8px;font-size:10px;text-align:right;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">前月</th>
+          <th style="padding:5px 8px;font-size:10px;text-align:right;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">差分</th>
+          <th style="padding:5px 8px;font-size:10px;text-align:center;color:var(--text2);text-transform:uppercase;letter-spacing:.05em">判定</th>
+        </tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </div>`;
+  });
+
+  container.innerHTML = alertHtml + cardsHtml;
+}
+
+function downloadCheckExcel() {
+  const ym = document.getElementById('checkMonth').value || currentMonth;
+  const prevYm = getPrevMonth(ym);
+  const withData = state.empMasters.filter(e =>
+    ((state.monthData[ym] || {})[e.id] || []).length > 0 ||
+    ((state.monthData[prevYm] || {})[e.id] || []).length > 0
+  );
+  if(!withData.length) { alert('データがありません'); return; }
+
+  const wb = XLSX.utils.book_new();
+  const headers = ['氏名','雇用区分','所定時間',
+    '当月_出勤日数','当月_実働h','当月_早出h','当月_残業h','当月_遅早h','当月_要確認',
+    '前月_出勤日数','前月_実働h','前月_早出h','前月_残業h','前月_遅早h',
+    '差_出勤日数','差_実働h','差_残業h',
+    '判定_出勤','判定_実働','判定_残業','総合判定'];
+  const rows = [
+    [`月次チェック表 ${ym}（前月：${prevYm}）`],[],
+    headers
+  ];
+  const levelLabel = {ok:'正常',warn:'要注意',danger:'要確認',nodata:'前月なし'};
+  withData.forEach(emp => {
+    const curr = calcEmpSummary(emp.id, ym);
+    const prev = calcEmpSummary(emp.id, prevYm);
+    const lDays = checkLevel(curr, prev, 'days');
+    const lTotal = checkLevel(curr, prev, 'total');
+    const lOt = checkLevel(curr, prev, 'ot');
+    const worst = [lDays,lTotal,lOt].includes('danger')||curr.issues>0 ? '要確認'
+      : [lDays,lTotal,lOt].includes('warn') ? '要注意' : '正常';
+    rows.push([
+      emp.name, emp.empType==='part'?'パート':'正社員', emp.stdHours+'h',
+      curr.days, parseFloat(curr.total.toFixed(2)), parseFloat(curr.early.toFixed(2)),
+      parseFloat(curr.ot.toFixed(2)), parseFloat(curr.late.toFixed(2)), curr.issues,
+      prev.hasData?prev.days:'', prev.hasData?parseFloat(prev.total.toFixed(2)):'',
+      prev.hasData?parseFloat(prev.early.toFixed(2)):'',
+      prev.hasData?parseFloat(prev.ot.toFixed(2)):'',
+      prev.hasData?parseFloat(prev.late.toFixed(2)):'',
+      prev.hasData?curr.days-prev.days:'',
+      prev.hasData?parseFloat((curr.total-prev.total).toFixed(2)):'',
+      prev.hasData?parseFloat((curr.ot-prev.ot).toFixed(2)):'',
+      levelLabel[lDays], levelLabel[lTotal], levelLabel[lOt], worst
+    ]);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [{wch:14},{wch:10},{wch:10},{wch:12},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:12},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10}];
+  XLSX.utils.book_append_sheet(wb, ws, '月次チェック');
+  XLSX.writeFile(wb, `月次チェック_${ym}.xlsx`);
+  toast('チェック表をダウンロードしました！');
+}
 
 // ===== HELPERS =====
 function setStatus(msg){document.getElementById('statusBar').textContent=msg;}
