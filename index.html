@@ -478,6 +478,9 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
 
 <!-- ===== MASTER ===== -->
 <div class="page" id="page-master">
+  <!-- 契約更新アラートバナー -->
+  <div id="contractAlertBanner"></div>
+
   <div class="card">
     <div class="card-head">
       <div class="card-title">👤 従業員マスター</div>
@@ -486,7 +489,16 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
     <div class="card-body" style="padding:0">
       <div class="table-wrap">
         <table class="master-table">
-          <thead><tr><th>氏名</th><th>部署</th><th>雇用区分</th><th>所定時間(h)</th><th>残業対象</th><th>操作</th></tr></thead>
+          <thead><tr>
+            <th>氏名</th>
+            <th>部署</th>
+            <th>雇用区分</th>
+            <th>所定時間(h)</th>
+            <th>残業対象</th>
+            <th>契約終了日</th>
+            <th>契約状態</th>
+            <th>操作</th>
+          </tr></thead>
           <tbody id="empMasterBody"></tbody>
         </table>
       </div>
@@ -574,12 +586,32 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
       <div class="form-item" style="grid-column:1/-1"><label>氏名</label><input type="text" id="mEmpName" placeholder="山田 太郎"></div>
       <div class="form-item"><label>部署</label><select id="mEmpDept"><option value="">（なし）</option></select></div>
       <div class="form-item"><label>雇用区分</label>
-        <select id="mEmpType">
-          <option value="fulltime">正社員（遅早：打刻基準）</option>
-          <option value="part">パート（遅早：所定時間基準）</option>
+        <select id="mEmpType" onchange="toggleContractFields()">
+          <option value="fulltime">正社員</option>
+          <option value="contract">契約社員</option>
+          <option value="part">パート</option>
         </select>
       </div>
       <div class="form-item" style="grid-column:1/-1"><label>所定労働時間（h/日）</label><input type="number" id="mEmpHours" value="8" step="0.5" min="1" max="12"></div>
+
+      <!-- 契約社員のみ表示 -->
+      <div class="form-item" id="contractFields" style="grid-column:1/-1;display:none;background:var(--warn-bg);border:1px solid #EF9F27;border-radius:8px;padding:.75rem;margin-top:.25rem">
+        <div style="font-size:12px;font-weight:700;color:var(--warn);margin-bottom:.75rem">📋 契約情報（契約社員のみ）</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+          <div class="form-item">
+            <label>契約開始日</label>
+            <input type="date" id="mContractStart">
+          </div>
+          <div class="form-item">
+            <label>契約終了日</label>
+            <input type="date" id="mContractEnd">
+          </div>
+          <div class="form-item" style="grid-column:1/-1">
+            <label>備考（契約条件など）</label>
+            <input type="text" id="mContractNote" placeholder="例：製造部配属・時給1,200円">
+          </div>
+        </div>
+      </div>
     </div>
     <div class="toggle-wrap" style="margin-bottom:1.25rem">
       <label class="toggle"><input type="checkbox" id="mEmpOT" checked><span class="toggle-slider"></span></label>
@@ -920,15 +952,28 @@ function updateGuide() {
   const totalEmp = state.empMasters.length;
   const confirmedCount = Object.keys((locks[lockKey] || {})).length;
 
+  // 契約更新アラートを最優先で表示
+  const urgentContracts = state.empMasters.filter(e => {
+    const cs = contractStatus(e);
+    return cs && cs.days <= 60;
+  });
+  if(urgentContracts.length > 0) {
+    const most = urgentContracts[0];
+    const cs = contractStatus(most);
+    guideStep.textContent = '契約更新';
+    guideStep.style.background = cs.urgent ? 'var(--danger)' : 'var(--warn)';
+    guideMsg.textContent = `${cs.urgent?'🚨':'⚠️'} ${most.name}の契約更新まで${cs.days}日です（${most.contractEnd}）。確認してください。`;
+    return;
+  }
+
   if(!currentEmpId) {
     guideStep.textContent = 'STEP 1';
     guideStep.style.background = '#185FA5';
     guideMsg.textContent = '👆 従業員タブから対象の従業員を選択してください';
   } else if(isLocked()) {
-    const emp = state.empMasters.find(e => e.id===currentEmpId);
     const nextEmp = state.empMasters.find(e => {
       const c = locks[lockKey] || {};
-      return !c[e.id];
+      return !c[e.id] && !c[String(e.id)];
     });
     guideStep.textContent = `${confirmedCount}/${totalEmp}名 確定済`;
     guideStep.style.background = '#2D6A3F';
@@ -1474,24 +1519,74 @@ function downloadMonth(ym) {
 }
 
 // ===== MASTER =====
+function contractStatus(emp) {
+  if(emp.empType !== 'contract' || !emp.contractEnd) return null;
+  const today = now.toISOString().slice(0,10);
+  const endDate = new Date(emp.contractEnd);
+  const daysLeft = Math.floor((endDate - now) / 86400000);
+  if(daysLeft < 0) return { label:'期限切れ', color:'var(--danger)', bg:'var(--danger-bg)', days: daysLeft, urgent: true };
+  if(daysLeft <= 30) return { label:`残${daysLeft}日`, color:'var(--danger)', bg:'var(--danger-bg)', days: daysLeft, urgent: true };
+  if(daysLeft <= 60) return { label:`残${daysLeft}日`, color:'var(--warn)', bg:'var(--warn-bg)', days: daysLeft, urgent: false };
+  if(daysLeft <= 90) return { label:`残${daysLeft}日`, color:'#185FA5', bg:'#E6F1FB', days: daysLeft, urgent: false };
+  return { label:'正常', color:'var(--success)', bg:'var(--success-bg)', days: daysLeft, urgent: false };
+}
+
+function renderContractAlertBanner() {
+  const banner = document.getElementById('contractAlertBanner');
+  if(!banner) return;
+  const contracts = state.empMasters
+    .filter(e => e.empType === 'contract' && e.contractEnd)
+    .map(e => ({ emp: e, status: contractStatus(e) }))
+    .filter(x => x.status && x.status.days <= 60)
+    .sort((a,b) => a.status.days - b.status.days);
+  if(!contracts.length) { banner.innerHTML = ''; return; }
+  banner.innerHTML = contracts.map(({emp, status}) => {
+    const msg = status.days < 0
+      ? `契約期限が切れています（${emp.contractEnd}）。至急対応してください。`
+      : `契約更新まで <strong>${status.days}日</strong>（契約終了日：${emp.contractEnd}）`;
+    return `<div style="background:${status.bg};border:1px solid ${status.urgent?'#F7C1C1':'#EF9F27'};border-radius:8px;padding:.7rem 1rem;margin-bottom:.5rem;font-size:13px;color:${status.color}">
+      ${status.urgent?'🚨':'⚠️'} <strong>${emp.name}</strong>（${emp.dept||'部署未設定'}）：${msg}
+    </div>`;
+  }).join('');
+}
+
 function renderEmpMaster() {
+  renderContractAlertBanner();
   const tbody = document.getElementById('empMasterBody');
   tbody.innerHTML = '';
   state.empMasters.forEach(emp => {
-    const typeLabel = emp.empType === 'part' ? '<span class="badge badge-info">パート</span>' : '<span class="badge badge-gray">正社員</span>';
+    const typeLabels = { fulltime:'正社員', contract:'契約社員', part:'パート' };
+    const typeBadges = { fulltime:'badge-gray', contract:'badge-warn', part:'badge-info' };
+    const typeLabel = typeLabels[emp.empType||'fulltime'] || '正社員';
+    const typeBadge = typeBadges[emp.empType||'fulltime'] || 'badge-gray';
+    const cs = contractStatus(emp);
+    const contractEndCell = emp.empType === 'contract' && emp.contractEnd
+      ? `<span style="font-family:var(--mono);font-size:12px;color:${cs?cs.color:'var(--text)'}">${emp.contractEnd}</span>`
+      : '<span style="color:var(--text2)">—</span>';
+    const contractStatusCell = cs
+      ? `<span class="badge" style="background:${cs.bg};color:${cs.color}">${cs.label}</span>`
+      : '<span style="color:var(--text2)">—</span>';
     const tr = document.createElement('tr');
+    if(cs && cs.days <= 60) tr.style.background = cs.urgent ? '#FFF5F5' : '#FFFBF0';
     tr.innerHTML = `
       <td style="font-weight:500">${emp.name}</td>
       <td>${emp.dept||'—'}</td>
-      <td>${typeLabel}</td>
+      <td><span class="badge ${typeBadge}">${typeLabel}</span></td>
       <td style="font-family:var(--mono)">${emp.stdHours}h</td>
-      <td><span class="badge ${emp.hasOT?'badge-ok':'badge-gray'}">${emp.hasOT?'あり':'なし（管理職等）'}</span></td>
+      <td><span class="badge ${emp.hasOT?'badge-ok':'badge-gray'}">${emp.hasOT?'あり':'なし'}</span></td>
+      <td>${contractEndCell}</td>
+      <td>${contractStatusCell}</td>
       <td style="display:flex;gap:6px">
         <button class="btn btn-sm" onclick="editEmpFn(${emp.id})">編集</button>
         <button class="btn btn-sm btn-danger" onclick="deleteEmp(${emp.id})">削除</button>
       </td>`;
     tbody.appendChild(tr);
   });
+}
+
+function toggleContractFields() {
+  const type = document.getElementById('mEmpType').value;
+  document.getElementById('contractFields').style.display = type === 'contract' ? 'block' : 'none';
 }
 
 function showEmpForm(id=null) {
@@ -1502,8 +1597,14 @@ function showEmpForm(id=null) {
   document.getElementById('mEmpHours').value=emp?emp.stdHours:8;
   document.getElementById('mEmpOT').checked=emp?emp.hasOT:true;
   document.getElementById('mEmpType').value=emp?(emp.empType||'fulltime'):'fulltime';
+  document.getElementById('mContractStart').value=emp?emp.contractStart||'':'';
+  document.getElementById('mContractEnd').value=emp?emp.contractEnd||'':'';
+  document.getElementById('mContractNote').value=emp?emp.contractNote||'':'';
   populateDeptSelect('mEmpDept');
-  setTimeout(()=>{ document.getElementById('mEmpDept').value=emp?emp.dept:''; },50);
+  setTimeout(()=>{
+    document.getElementById('mEmpDept').value=emp?emp.dept:'';
+    toggleContractFields();
+  },50);
   document.getElementById('empFormModal').classList.add('show');
 }
 function hideEmpForm(){document.getElementById('empFormModal').classList.remove('show');}
@@ -1516,12 +1617,16 @@ function deleteEmp(id){
 function saveEmp(){
   const name=document.getElementById('mEmpName').value.trim();
   if(!name){alert('氏名を入力してください');return;}
+  const empType = document.getElementById('mEmpType').value;
   const data={
     name,
     dept:document.getElementById('mEmpDept').value,
-    empType:document.getElementById('mEmpType').value,
+    empType,
     stdHours:parseFloat(document.getElementById('mEmpHours').value)||8,
-    hasOT:document.getElementById('mEmpOT').checked
+    hasOT:document.getElementById('mEmpOT').checked,
+    contractStart: empType==='contract' ? document.getElementById('mContractStart').value : '',
+    contractEnd:   empType==='contract' ? document.getElementById('mContractEnd').value : '',
+    contractNote:  empType==='contract' ? document.getElementById('mContractNote').value : '',
   };
   if(editEmpId){Object.assign(state.empMasters.find(e=>e.id===editEmpId),data);}
   else{data.id=++state.empIdSeq;state.empMasters.push(data);}
