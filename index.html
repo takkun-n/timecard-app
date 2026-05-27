@@ -405,25 +405,27 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
   <!-- アラートバナー -->
   <div id="vacAlertBanner"></div>
 
-  <!-- 従業員別有休状況 -->
+  <!-- 従業員別有休管理（直接編集） -->
   <div class="card">
     <div class="card-head">
-      <div class="card-title">🏖 有休残日数一覧</div>
-      <button class="btn btn-sm btn-accent" onclick="showVacGrantForm()">＋ 有休付与</button>
+      <div class="card-title">🏖 有休管理（従業員別）</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm btn-success" onclick="saveVacDirect()">💾 保存</button>
+        <button class="btn btn-sm btn-accent" onclick="showVacUseForm()">＋ 有休取得登録</button>
+      </div>
     </div>
     <div class="card-body" style="padding:0">
-      <table class="master-table" id="vacSummaryTable">
+      <table class="master-table" id="vacDirectTable">
         <thead><tr>
-          <th>氏名</th>
-          <th>残日数</th>
-          <th>前回付与日</th>
-          <th>前回付与日数</th>
-          <th>次回付与予定</th>
-          <th>次回付与日数</th>
-          <th>有効期限</th>
-          <th>操作</th>
+          <th style="width:120px">氏名</th>
+          <th style="width:90px">現在残日数</th>
+          <th style="width:100px">次回付与予定日</th>
+          <th style="width:80px">次回付与日数</th>
+          <th style="width:100px">有効期限</th>
+          <th style="width:80px">取得済日数</th>
+          <th style="width:80px">状態</th>
         </tr></thead>
-        <tbody id="vacSummaryBody"></tbody>
+        <tbody id="vacDirectBody"></tbody>
       </table>
     </div>
   </div>
@@ -432,11 +434,17 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
   <div class="card">
     <div class="card-head">
       <div class="card-title">📋 有休取得履歴</div>
-      <button class="btn btn-sm btn-accent" onclick="showVacUseForm()">＋ 有休取得登録</button>
     </div>
     <div class="card-body" style="padding:0">
       <table class="master-table">
-        <thead><tr><th>氏名</th><th>取得日</th><th>日数</th><th>種別</th><th>備考</th><th>操作</th></tr></thead>
+        <thead><tr>
+          <th>氏名</th>
+          <th>取得日</th>
+          <th>日数</th>
+          <th>種別</th>
+          <th>備考</th>
+          <th>操作</th>
+        </tr></thead>
         <tbody id="vacHistoryBody"></tbody>
       </table>
     </div>
@@ -596,28 +604,6 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
   </div>
 </div>
 
-<!-- 有休付与モーダル -->
-<div class="modal-bg" id="vacGrantModal">
-  <div class="modal">
-    <h3>有休付与</h3>
-    <div class="form-grid" style="grid-template-columns:1fr 1fr;margin-bottom:1rem">
-      <div class="form-item" style="grid-column:1/-1"><label>従業員</label>
-        <select id="vgEmpId"></select>
-      </div>
-      <div class="form-item"><label>付与日</label><input type="date" id="vgDate"></div>
-      <div class="form-item"><label>付与日数</label><input type="number" id="vgDays" value="10" step="0.5" min="0.5" max="40"></div>
-      <div class="form-item"><label>有効期限</label><input type="date" id="vgExpiry"></div>
-      <div class="form-item"><label>次回付与予定日</label><input type="date" id="vgNextDate"></div>
-      <div class="form-item"><label>次回付与予定日数</label><input type="number" id="vgNextDays" value="11" step="0.5" min="0" max="40"></div>
-      <div class="form-item" style="grid-column:1/-1"><label>備考</label><input type="text" id="vgNote" placeholder="例：入社6ヶ月経過"></div>
-    </div>
-    <div style="display:flex;gap:8px;justify-content:flex-end">
-      <button class="btn" onclick="hideVacGrantForm()">キャンセル</button>
-      <button class="btn btn-accent" onclick="saveVacGrant()">付与登録</button>
-    </div>
-  </div>
-</div>
-
 <!-- 有休取得モーダル -->
 <div class="modal-bg" id="vacUseModal">
   <div class="modal">
@@ -627,19 +613,23 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
         <select id="vuEmpId" onchange="updateVacBalance()"></select>
       </div>
       <div class="form-item"><label>取得日</label><input type="date" id="vuDate"></div>
-      <div class="form-item"><label>取得日数</label><input type="number" id="vuDays" value="1" step="0.5" min="0.5" max="20"></div>
       <div class="form-item"><label>種別</label>
-        <select id="vuType">
-          <option value="全日">全日</option>
+        <select id="vuType" onchange="updateVacDaysFromType()">
+          <option value="全日">全日（1日）</option>
           <option value="午前半休">午前半休（0.5日）</option>
           <option value="午後半休">午後半休（0.5日）</option>
         </select>
       </div>
-      <div class="form-item" style="grid-column:1/-1">
-        <label>現在の残日数</label>
-        <div id="vuBalance" style="font-size:16px;font-weight:500;color:var(--accent);padding:4px 0">—</div>
+      <div class="form-item"><label>取得日数</label>
+        <input type="number" id="vuDays" value="1" step="0.5" min="0.5" max="20">
       </div>
-      <div class="form-item" style="grid-column:1/-1"><label>備考</label><input type="text" id="vuNote" placeholder="例：私用"></div>
+      <div class="form-item">
+        <label>取得後の残日数</label>
+        <div id="vuBalance" style="font-size:18px;font-weight:700;color:var(--accent);padding:6px 0">—</div>
+      </div>
+      <div class="form-item" style="grid-column:1/-1"><label>備考</label>
+        <input type="text" id="vuNote" placeholder="例：私用、旅行など">
+      </div>
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn" onclick="hideVacUseForm()">キャンセル</button>
@@ -2010,79 +2000,107 @@ function renderCalendar() {
 }
 
 // ===== VACATION =====
-function calcVacBalance(empId) {
-  const grants = (state.vacation.grants || []).filter(g => g.empId === empId);
-  const uses   = (state.vacation.uses   || []).filter(u => u.empId === empId);
-  const todayStr = now.toISOString().slice(0,10);
-  // 有効期限内の付与合計
-  let total = grants
-    .filter(g => !g.expiry || g.expiry >= todayStr)
-    .reduce((acc,g) => acc + (parseFloat(g.days)||0), 0);
-  let used = uses.reduce((acc,u) => acc + (parseFloat(u.days)||0), 0);
-  return Math.max(0, total - used);
+
+// 従業員ごとの有休マスター取得（なければ初期値）
+function getVacMaster(empId) {
+  if(!state.vacation.masters) state.vacation.masters = {};
+  const key = String(empId);
+  if(!state.vacation.masters[key]) {
+    state.vacation.masters[key] = {
+      balance: 0,       // 現在の残日数
+      nextDate: '',     // 次回付与予定日
+      nextDays: 0,      // 次回付与予定日数
+      expiry: '',       // 有効期限
+    };
+  }
+  return state.vacation.masters[key];
 }
 
-function getLatestGrant(empId) {
-  const grants = (state.vacation.grants || []).filter(g => g.empId === empId);
-  if(!grants.length) return null;
-  return grants.sort((a,b) => b.date.localeCompare(a.date))[0];
+function calcVacBalance(empId) {
+  const key = String(empId);
+  const master = (state.vacation.masters || {})[key];
+  const baseBalance = master ? parseFloat(master.balance)||0 : 0;
+  // 取得済み日数を差し引く
+  const used = (state.vacation.uses || [])
+    .filter(u => String(u.empId) === key)
+    .reduce((acc,u) => acc + (parseFloat(u.days)||0), 0);
+  return Math.max(0, baseBalance - used);
 }
 
 function renderVacationAlertBanner() {
   const banner = document.getElementById('vacAlertBanner');
   if(!banner) return;
-  const todayStr = now.toISOString().slice(0,10);
   const alerts = [];
   state.empMasters.forEach(emp => {
-    const g = getLatestGrant(emp.id);
-    if(!g || !g.nextDate) return;
-    const daysUntil = Math.floor((new Date(g.nextDate) - now) / 86400000);
+    const m = getVacMaster(emp.id);
+    if(!m.nextDate) return;
+    const daysUntil = Math.floor((new Date(m.nextDate) - now) / 86400000);
     if(daysUntil <= 30 && daysUntil >= 0) {
-      alerts.push({ name: emp.name, days: daysUntil, nextDate: g.nextDate, nextDays: g.nextDays });
+      alerts.push({ name: emp.name, days: daysUntil, nextDate: m.nextDate, nextDays: m.nextDays });
     }
-    // 有効期限切れ警告
-    if(g.expiry && g.expiry < todayStr) {
+    // 有効期限切れ
+    if(m.expiry && m.expiry < now.toISOString().slice(0,10)) {
       const bal = calcVacBalance(emp.id);
       if(bal > 0) alerts.push({ name: emp.name, expiry: true, bal });
     }
   });
   if(!alerts.length) { banner.innerHTML = ''; return; }
-  const html = alerts.map(a => {
-    if(a.expiry) return `<div style="background:var(--danger-bg);border:1px solid #F7C1C1;border-radius:8px;padding:.6rem 1rem;margin-bottom:.5rem;font-size:13px;color:var(--danger)">⚠️ <strong>${a.name}</strong>：有効期限切れの有休が残っています（残${a.bal}日）。確認してください。</div>`;
+  banner.innerHTML = alerts.map(a => {
+    if(a.expiry) return `<div style="background:var(--danger-bg);border:1px solid #F7C1C1;border-radius:8px;padding:.6rem 1rem;margin-bottom:.5rem;font-size:13px;color:var(--danger)">⚠️ <strong>${a.name}</strong>：有効期限切れの有休が残っています（残${a.bal.toFixed(1)}日）。確認してください。</div>`;
     const color = a.days <= 7 ? 'var(--danger)' : 'var(--warn)';
     const bg = a.days <= 7 ? 'var(--danger-bg)' : 'var(--warn-bg)';
-    const border = a.days <= 7 ? '#F7C1C1' : '#EF9F27';
-    return `<div style="background:${bg};border:1px solid ${border};border-radius:8px;padding:.6rem 1rem;margin-bottom:.5rem;font-size:13px;color:${color}">🔔 <strong>${a.name}</strong>：次回有休付与まで <strong>${a.days}日</strong>（${a.nextDate}、${a.nextDays}日付与予定）</div>`;
+    const bdr = a.days <= 7 ? '#F7C1C1' : '#EF9F27';
+    return `<div style="background:${bg};border:1px solid ${bdr};border-radius:8px;padding:.6rem 1rem;margin-bottom:.5rem;font-size:13px;color:${color}">🔔 <strong>${a.name}</strong>：次回有休付与まで <strong>${a.days}日</strong>（${a.nextDate}、${a.nextDays}日付与予定）</div>`;
   }).join('');
-  banner.innerHTML = html;
 }
 
 function renderVacation() {
   renderVacationAlertBanner();
-  // サマリーテーブル
-  const tbody = document.getElementById('vacSummaryBody');
+
+  // 直接編集テーブル
+  const tbody = document.getElementById('vacDirectBody');
   tbody.innerHTML = '';
   state.empMasters.forEach(emp => {
-    const bal = calcVacBalance(emp.id);
-    const g = getLatestGrant(emp.id);
+    const m = getVacMaster(emp.id);
+    const used = (state.vacation.uses || [])
+      .filter(u => String(u.empId) === String(emp.id))
+      .reduce((acc,u) => acc + (parseFloat(u.days)||0), 0);
+    const remaining = Math.max(0, (parseFloat(m.balance)||0) - used);
+    const balColor = remaining <= 3 ? 'color:var(--danger);font-weight:700'
+      : remaining <= 7 ? 'color:var(--warn);font-weight:700' : 'color:var(--success);font-weight:700';
+    const nextAlert = m.nextDate && Math.floor((new Date(m.nextDate)-now)/86400000) <= 30;
     const tr = document.createElement('tr');
-    const balColor = bal <= 3 ? 'color:var(--danger);font-weight:500' : bal <= 7 ? 'color:var(--warn);font-weight:500' : '';
     tr.innerHTML = `
-      <td style="font-weight:500">${emp.name}</td>
-      <td style="font-family:var(--mono);font-size:14px;${balColor}">${bal.toFixed(1)} 日</td>
-      <td style="font-size:12px">${g ? g.date : '—'}</td>
-      <td style="font-size:12px">${g ? g.days+'日' : '—'}</td>
-      <td style="font-size:12px;${g&&g.nextDate&&Math.floor((new Date(g.nextDate)-now)/86400000)<=30?'color:var(--danger);font-weight:500':''}">${g&&g.nextDate ? g.nextDate : '—'}</td>
-      <td style="font-size:12px">${g&&g.nextDays ? g.nextDays+'日' : '—'}</td>
-      <td style="font-size:12px;${g&&g.expiry&&g.expiry<now.toISOString().slice(0,10)?'color:var(--danger)':''}">${g&&g.expiry ? g.expiry : '—'}</td>
-      <td style="display:flex;gap:4px">
-        <button class="btn btn-sm" onclick="showVacGrantFormFor(${emp.id})">付与</button>
-        <button class="btn btn-sm" onclick="showVacUseFormFor(${emp.id})">取得</button>
-      </td>`;
+      <td style="font-weight:500;white-space:nowrap">${emp.name}</td>
+      <td>
+        <input type="number" value="${parseFloat(m.balance)||0}" step="0.5" min="0" max="99"
+          style="width:60px;text-align:right;font-family:var(--mono);font-weight:700;${balColor.replace('color:','color:')}"
+          onchange="updateVacMaster(${emp.id},'balance',this.value);rerenderVacRow(this,${emp.id})"
+          title="現在の残日数を直接入力できます">
+        <span style="font-size:11px;color:var(--text2)"> 日</span>
+      </td>
+      <td>
+        <input type="date" value="${m.nextDate||''}"
+          style="font-size:12px;border:1px solid var(--border);border-radius:5px;padding:3px 6px"
+          onchange="updateVacMaster(${emp.id},'nextDate',this.value)">
+      </td>
+      <td>
+        <input type="number" value="${parseFloat(m.nextDays)||0}" step="0.5" min="0" max="40"
+          style="width:56px;text-align:right;font-family:var(--mono)"
+          onchange="updateVacMaster(${emp.id},'nextDays',this.value)">
+        <span style="font-size:11px;color:var(--text2)"> 日</span>
+      </td>
+      <td>
+        <input type="date" value="${m.expiry||''}"
+          style="font-size:12px;border:1px solid var(--border);border-radius:5px;padding:3px 6px"
+          onchange="updateVacMaster(${emp.id},'expiry',this.value)">
+      </td>
+      <td style="text-align:right;font-family:var(--mono);color:var(--text2)">${used.toFixed(1)} 日</td>
+      <td style="${balColor};font-family:var(--mono);font-size:14px">${remaining.toFixed(1)} 日</td>`;
     tbody.appendChild(tr);
   });
 
-  // 履歴テーブル
+  // 取得履歴
   const hbody = document.getElementById('vacHistoryBody');
   hbody.innerHTML = '';
   const allUses = [...(state.vacation.uses || [])].sort((a,b) => b.date.localeCompare(a.date));
@@ -2091,21 +2109,78 @@ function renderVacation() {
     return;
   }
   allUses.forEach(u => {
-    const emp = state.empMasters.find(e => e.id === u.empId);
+    const emp = state.empMasters.find(e => String(e.id) === String(u.empId));
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td style="font-weight:500">${emp ? emp.name : '不明'}</td>
-      <td style="font-family:var(--mono)">${u.date}</td>
-      <td style="font-family:var(--mono)">${u.days}日</td>
+      <td style="font-family:var(--mono)">
+        <input type="date" value="${u.date}"
+          style="font-size:12px;border:1px solid var(--border);border-radius:5px;padding:3px 6px"
+          onchange="updateVacUse(${u.id},'date',this.value)">
+      </td>
+      <td>
+        <input type="number" value="${u.days}" step="0.5" min="0.5" max="20"
+          style="width:52px;text-align:right;font-family:var(--mono)"
+          onchange="updateVacUse(${u.id},'days',this.value)">
+        <span style="font-size:11px;color:var(--text2)"> 日</span>
+      </td>
       <td><span class="badge badge-info">${u.type||'全日'}</span></td>
-      <td style="font-size:12px;color:var(--text2)">${u.note||''}</td>
+      <td style="font-size:12px;color:var(--text2)">
+        <input type="text" value="${u.note||''}" placeholder="備考"
+          style="width:100px;font-size:12px"
+          onchange="updateVacUse(${u.id},'note',this.value)">
+      </td>
       <td><button class="btn btn-sm btn-danger" onclick="deleteVacUse(${u.id})">削除</button></td>`;
     hbody.appendChild(tr);
   });
 }
 
+function updateVacMaster(empId, key, val) {
+  const m = getVacMaster(empId);
+  m[key] = key === 'nextDate' || key === 'expiry' ? val : parseFloat(val)||0;
+  renderVacationAlertBanner();
+  // 残日数列だけ更新
+  const remaining = calcVacBalance(empId);
+  // 全体は再描画せずセルだけ更新（入力フォーカスを維持）
+}
+
+function rerenderVacRow(input, empId) {
+  // 残日数表示だけ更新（テーブル全体を再描画しない）
+  const tr = input.closest('tr');
+  const cells = tr.querySelectorAll('td');
+  const m = getVacMaster(empId);
+  const used = (state.vacation.uses || [])
+    .filter(u => String(u.empId) === String(empId))
+    .reduce((acc,u) => acc + (parseFloat(u.days)||0), 0);
+  const remaining = Math.max(0, (parseFloat(m.balance)||0) - used);
+  const balColor = remaining <= 3 ? 'var(--danger)' : remaining <= 7 ? 'var(--warn)' : 'var(--success)';
+  cells[6].textContent = remaining.toFixed(1) + ' 日';
+  cells[6].style.color = balColor;
+}
+
+function saveVacDirect() {
+  saveState();
+  renderVacationAlertBanner();
+  toast('有休データを保存しました！');
+}
+
+function updateVacUse(id, key, val) {
+  const u = state.vacation.uses.find(u => u.id === id);
+  if(!u) return;
+  u[key] = key === 'days' ? parseFloat(val)||0 : val;
+  saveState();
+  renderVacation();
+}
+
+function deleteVacUse(id) {
+  if(!confirm('この取得記録を削除しますか？')) return;
+  state.vacation.uses = state.vacation.uses.filter(u => u.id !== id);
+  saveState(); renderVacation(); toast('削除しました');
+}
+
 function populateVacEmpSelect(selId) {
   const sel = document.getElementById(selId);
+  if(!sel) return;
   sel.innerHTML = '';
   state.empMasters.forEach(e => {
     const opt = document.createElement('option');
@@ -2114,56 +2189,37 @@ function populateVacEmpSelect(selId) {
   });
 }
 
-function showVacGrantForm() { showVacGrantFormFor(null); }
-function showVacGrantFormFor(empId) {
-  populateVacEmpSelect('vgEmpId');
-  if(empId) document.getElementById('vgEmpId').value = empId;
-  const today = now.toISOString().slice(0,10);
-  document.getElementById('vgDate').value = today;
-  // 次回付与は1年後をデフォルト
-  const nextYear = new Date(now); nextYear.setFullYear(nextYear.getFullYear()+1);
-  document.getElementById('vgNextDate').value = nextYear.toISOString().slice(0,10);
-  const expiry = new Date(now); expiry.setFullYear(expiry.getFullYear()+2);
-  document.getElementById('vgExpiry').value = expiry.toISOString().slice(0,10);
-  document.getElementById('vgNote').value = '';
-  document.getElementById('vacGrantModal').classList.add('show');
-}
-function hideVacGrantForm() { document.getElementById('vacGrantModal').classList.remove('show'); }
-
-function saveVacGrant() {
-  const empId = parseInt(document.getElementById('vgEmpId').value);
-  const date = document.getElementById('vgDate').value;
-  const days = parseFloat(document.getElementById('vgDays').value);
-  if(!date || !days) { alert('付与日と付与日数を入力してください'); return; }
-  const grant = {
-    id: ++state.vacIdSeq, empId, date, days,
-    expiry: document.getElementById('vgExpiry').value,
-    nextDate: document.getElementById('vgNextDate').value,
-    nextDays: parseFloat(document.getElementById('vgNextDays').value)||0,
-    note: document.getElementById('vgNote').value
-  };
-  state.vacation.grants.push(grant);
-  saveState(); hideVacGrantForm(); renderVacation();
-  toast('有休を付与しました');
-}
-
 function showVacUseForm() { showVacUseFormFor(null); }
 function showVacUseFormFor(empId) {
   populateVacEmpSelect('vuEmpId');
   if(empId) document.getElementById('vuEmpId').value = empId;
   document.getElementById('vuDate').value = now.toISOString().slice(0,10);
   document.getElementById('vuDays').value = 1;
+  document.getElementById('vuType').value = '全日';
   document.getElementById('vuNote').value = '';
   updateVacBalance();
   document.getElementById('vacUseModal').classList.add('show');
 }
 function hideVacUseForm() { document.getElementById('vacUseModal').classList.remove('show'); }
 
+function updateVacDaysFromType() {
+  const type = document.getElementById('vuType').value;
+  if(type === '午前半休' || type === '午後半休') {
+    document.getElementById('vuDays').value = 0.5;
+  } else {
+    document.getElementById('vuDays').value = 1;
+  }
+  updateVacBalance();
+}
+
 function updateVacBalance() {
   const empId = parseInt(document.getElementById('vuEmpId').value);
+  const currentDays = parseFloat(document.getElementById('vuDays').value)||0;
   const bal = calcVacBalance(empId);
-  document.getElementById('vuBalance').textContent = bal.toFixed(1) + ' 日';
-  document.getElementById('vuBalance').style.color = bal <= 3 ? 'var(--danger)' : 'var(--accent)';
+  const afterBal = Math.max(0, bal - currentDays);
+  const color = afterBal <= 3 ? 'var(--danger)' : afterBal <= 7 ? 'var(--warn)' : 'var(--success)';
+  document.getElementById('vuBalance').textContent = `${bal.toFixed(1)}日 → 取得後 ${afterBal.toFixed(1)}日`;
+  document.getElementById('vuBalance').style.color = color;
 }
 
 function saveVacUse() {
@@ -2176,16 +2232,11 @@ function saveVacUse() {
   if(days > bal) {
     if(!confirm(`残日数（${bal.toFixed(1)}日）を超えています。このまま登録しますか？`)) return;
   }
+  if(!state.vacation.uses) state.vacation.uses = [];
   const use = { id: ++state.vacIdSeq, empId, date, days, type, note: document.getElementById('vuNote').value };
   state.vacation.uses.push(use);
   saveState(); hideVacUseForm(); renderVacation();
   toast('有休取得を登録しました');
-}
-
-function deleteVacUse(id) {
-  if(!confirm('この取得記録を削除しますか？')) return;
-  state.vacation.uses = state.vacation.uses.filter(u => u.id !== id);
-  saveState(); renderVacation(); toast('削除しました');
 }
 
 // ===== HELPERS =====
