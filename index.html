@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>タイムカード勤怠管理システム</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap');
 :root{
@@ -19,6 +22,9 @@
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
 
+#loadingScreen{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1rem}
+.loading-spinner{width:44px;height:44px;border:4px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 #loginScreen{min-height:100vh;display:flex;align-items:center;justify-content:center}
 .login-wrap{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:2.5rem 2rem;width:100%;max-width:360px;text-align:center}
 .login-logo{width:56px;height:56px;border-radius:12px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;margin:0 auto 1.25rem;font-size:24px}
@@ -191,8 +197,14 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
 
 <div class="save-indicator" id="saveIndicator">✓ 保存済み</div>
 
+<!-- LOADING -->
+<div id="loadingScreen">
+  <div class="loading-spinner"></div>
+  <p style="color:var(--text2);font-size:13px">データを読み込み中...</p>
+</div>
+
 <!-- LOGIN -->
-<div id="loginScreen">
+<div id="loginScreen" style="display:none">
   <div class="login-wrap">
     <div class="login-logo">🕐</div>
     <h1>タイムカード勤怠管理</h1>
@@ -227,6 +239,7 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
   <div class="nav-tab" onclick="showPage('history')">📅 月別履歴</div>
   <div class="nav-tab" onclick="showPage('master')">👥 従業員マスター</div>
   <div class="nav-tab" onclick="showPage('dept')">🏢 部署マスター</div>
+  <div class="nav-tab" onclick="showPage('overtime')">📊 残業分析</div>
   <div class="nav-tab" onclick="showPage('settings')">⚙️ 勤務設定</div>
 </div>
 
@@ -256,6 +269,54 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
     </div>
     <div class="card-body" style="padding:.75rem 1.25rem">
       <div class="emp-tabs" id="empTabs"></div>
+    </div>
+  </div>
+
+  <!-- AIスキャン取込 -->
+  <div class="card" id="scanCard">
+    <div class="card-head" style="cursor:pointer" onclick="toggleScanCard()">
+      <div class="card-title">🤖 AIスキャン取込（タイムカードPDF → 自動入力）</div>
+      <span id="scanCardToggle" style="font-size:12px;color:var(--text2)">▶ 開く</span>
+    </div>
+    <div id="scanCardBody" style="display:none">
+      <div class="card-body">
+        <div style="background:var(--surface2);border-radius:8px;padding:.75rem 1rem;margin-bottom:1rem;font-size:12px;color:var(--text2);line-height:1.8">
+          📋 <strong>アマノBカード 20日締め対応</strong><br>
+          表面（21日〜月末）= 前月の日付　／　裏面（1日〜20日）= 当月の日付<br>
+          定時出 = 出勤　／　時間外 = 退勤　として読み取ります
+        </div>
+        <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:.75rem">
+          <div class="form-item">
+            <label>カード記載月（タイムカードに書いてある月）</label>
+            <input type="month" id="scanCardMonth" style="width:100%;border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px">
+          </div>
+          <div class="form-item">
+            <label>対象従業員</label>
+            <select id="scanEmpId" style="width:100%;border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;font-family:'Noto Sans JP',sans-serif"></select>
+          </div>
+        </div>
+        <div style="margin-bottom:.75rem">
+          <label style="font-size:12px;color:var(--text2);font-weight:500;display:block;margin-bottom:4px">タイムカードPDF（表裏2ページ）</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn btn-sm" onclick="document.getElementById('scanPdfInput').click()">📎 PDFを選択</button>
+            <span id="scanFileName" style="font-size:12px;color:var(--text2)">未選択</span>
+            <input type="file" id="scanPdfInput" accept=".pdf" style="display:none" onchange="onScanFileSelect(this)">
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:.75rem">
+          <button class="btn btn-accent" id="scanRunBtn" onclick="runScan()" disabled>🤖 AIで読み取り開始</button>
+          <span id="scanStatus" style="font-size:12px;color:var(--text2);align-self:center"></span>
+        </div>
+        <!-- 結果プレビュー -->
+        <div id="scanResult" style="display:none">
+          <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:.5rem">📋 読み取り結果プレビュー</div>
+          <div id="scanPreviewTable" style="overflow-x:auto;margin-bottom:.75rem"></div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-success" onclick="applyScanResult()">✅ このデータを取り込む</button>
+            <button class="btn" onclick="clearScanResult()">✕ クリア</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -484,12 +545,18 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
   <div class="card">
     <div class="card-head">
       <div class="card-title">👤 従業員マスター</div>
-      <button class="btn btn-sm btn-accent" onclick="showEmpForm()">＋ 新規登録</button>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-sm" onclick="exportEmpMasterExcel()">📥 Excel出力</button>
+        <button class="btn btn-sm btn-success" onclick="document.getElementById('empMasterImportFile').click()">📤 Excelで取込</button>
+        <input type="file" id="empMasterImportFile" accept=".xlsx,.xls" style="display:none" onchange="importEmpMasterExcel(this)">
+        <button class="btn btn-sm btn-accent" onclick="showEmpForm()">＋ 新規登録</button>
+      </div>
     </div>
     <div class="card-body" style="padding:0">
       <div class="table-wrap">
         <table class="master-table">
           <thead><tr>
+            <th>社員番号</th>
             <th>氏名</th>
             <th>部署</th>
             <th>雇用区分</th>
@@ -518,6 +585,57 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
         <thead><tr><th>部署名</th><th>操作</th></tr></thead>
         <tbody id="deptBody"></tbody>
       </table>
+    </div>
+  </div>
+</div>
+
+<!-- ===== OVERTIME ANALYSIS ===== -->
+<div class="page" id="page-overtime">
+
+  <!-- 月選択・操作 -->
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">📊 残業分析</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:12px;color:var(--text2)">対象月：</span>
+        <input type="month" id="otMonth" style="border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:13px;font-family:'Noto Sans JP',sans-serif" onchange="renderOvertimeAnalysis()">
+        <button class="btn btn-sm btn-success" onclick="exportOvertimeExcel()">⬇ Excel保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 全員トータル -->
+  <div class="card">
+    <div class="card-head"><div class="card-title">⏱ 当月 全員合計</div></div>
+    <div class="card-body" id="otTotalSummary">
+      <div style="text-align:center;color:var(--text2);padding:1rem">月を選択してください</div>
+    </div>
+  </div>
+
+  <!-- 部署別内訳 -->
+  <div class="card">
+    <div class="card-head"><div class="card-title">🏢 当月 部署別残業内訳</div></div>
+    <div class="card-body" style="padding:0">
+      <div id="otDeptTable"><div style="text-align:center;color:var(--text2);padding:1.5rem">データがありません</div></div>
+    </div>
+  </div>
+
+  <!-- 月次推移 -->
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">📈 部署別残業 月次推移</div>
+      <span style="font-size:11px;color:var(--text2)">データがある月を自動表示</span>
+    </div>
+    <div class="card-body" style="padding:0;overflow-x:auto">
+      <div id="otTrendTable"><div style="text-align:center;color:var(--text2);padding:1.5rem">データがありません</div></div>
+    </div>
+  </div>
+
+  <!-- 個人別明細 -->
+  <div class="card">
+    <div class="card-head"><div class="card-title">👤 当月 個人別残業明細</div></div>
+    <div class="card-body" style="padding:0">
+      <div id="otPersonTable"><div style="text-align:center;color:var(--text2);padding:1.5rem">データがありません</div></div>
     </div>
   </div>
 </div>
@@ -573,6 +691,55 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
       </div>
     </div>
   </div>
+
+  <!-- ユーザー管理 -->
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">👤 ログインユーザー管理</div>
+      <button class="btn btn-sm btn-accent" onclick="showUserForm(-1)">＋ ユーザー追加</button>
+    </div>
+    <div class="card-body">
+      <div id="userListTable"></div>
+      <!-- ユーザー入力フォーム -->
+      <div id="userForm" style="display:none;margin-top:1rem;padding:1rem;background:var(--surface2);border-radius:8px;border:1px solid var(--border)">
+        <div class="form-grid" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:.75rem">
+          <div class="form-item">
+            <label>ユーザーID <span style="color:var(--danger)">*</span></label>
+            <input type="text" id="uId" placeholder="例：tanaka" autocomplete="off">
+          </div>
+          <div class="form-item">
+            <label>氏名 <span style="color:var(--danger)">*</span></label>
+            <input type="text" id="uName" placeholder="例：田中 花子">
+          </div>
+          <div class="form-item">
+            <label>パスワード <span style="color:var(--danger)" id="uPwRequired">*</span><span id="uPwOptional" style="display:none;color:var(--text2)">（変更する場合のみ）</span></label>
+            <input type="password" id="uPw" placeholder="••••••••" autocomplete="new-password">
+          </div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-accent btn-sm" onclick="saveUser()">保存</button>
+          <button class="btn btn-sm" onclick="document.getElementById('userForm').style.display='none'">キャンセル</button>
+        </div>
+      </div>
+      <p style="font-size:11px;color:var(--text2);margin-top:.75rem">※ ユーザーIDは変更できません。IDを変えたい場合は削除して再登録してください。</p>
+    </div>
+  </div>
+
+  <!-- Claude API設定 -->
+  <div class="card">
+    <div class="card-head"><div class="card-title">🤖 Claude API設定（スキャン自動読取）</div></div>
+    <div class="card-body">
+      <p style="font-size:13px;color:var(--text2);margin-bottom:.75rem">
+        タイムカードのPDFをAIが自動で読み取ります。APIキーはこの端末のみに保存されます。<br>
+        取得先：<strong>console.anthropic.com</strong> → API Keys
+      </p>
+      <div class="form-grid" style="grid-template-columns:1fr auto;gap:.5rem;margin-bottom:.5rem">
+        <input type="password" id="cfg-api-key" placeholder="sk-ant-api03-..." style="border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;font-family:var(--mono);width:100%">
+        <button class="btn btn-sm btn-accent" onclick="saveApiKey()">保存</button>
+      </div>
+      <div id="apiKeyStatus" style="font-size:12px;color:var(--text2)">未設定</div>
+    </div>
+  </div>
 </div>
 
 </main>
@@ -583,7 +750,8 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
   <div class="modal">
     <h3 id="empFormTitle">従業員登録</h3>
     <div class="form-grid" style="grid-template-columns:1fr 1fr;margin-bottom:1rem">
-      <div class="form-item" style="grid-column:1/-1"><label>氏名</label><input type="text" id="mEmpName" placeholder="山田 太郎"></div>
+      <div class="form-item"><label>社員番号</label><input type="text" id="mEmpNo" placeholder="例：1001"></div>
+      <div class="form-item"><label>氏名</label><input type="text" id="mEmpName" placeholder="山田 太郎"></div>
       <div class="form-item"><label>部署</label><select id="mEmpDept"><option value="">（なし）</option></select></div>
       <div class="form-item"><label>雇用区分</label>
         <select id="mEmpType" onchange="toggleContractFields()">
@@ -594,9 +762,9 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
       </div>
       <div class="form-item" style="grid-column:1/-1"><label>所定労働時間（h/日）</label><input type="number" id="mEmpHours" value="8" step="0.5" min="1" max="12"></div>
 
-      <!-- 契約社員のみ表示 -->
+      <!-- 契約社員・パート表示 -->
       <div class="form-item" id="contractFields" style="grid-column:1/-1;display:none;background:var(--warn-bg);border:1px solid #EF9F27;border-radius:8px;padding:.75rem;margin-top:.25rem">
-        <div style="font-size:12px;font-weight:700;color:var(--warn);margin-bottom:.75rem">📋 契約情報（契約社員のみ）</div>
+        <div style="font-size:12px;font-weight:700;color:var(--warn);margin-bottom:.75rem">📋 雇用期間（契約社員・パート）</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
           <div class="form-item">
             <label>契約開始日</label>
@@ -627,11 +795,47 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
 
 <div class="modal-bg" id="deptFormModal">
   <div class="modal">
-    <h3>部署登録</h3>
+    <h3 id="deptFormTitle">部署登録</h3>
     <div class="form-item" style="margin-bottom:1rem"><label>部署名</label><input type="text" id="mDeptName" placeholder="製造部"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn" onclick="hideDeptForm()">キャンセル</button>
       <button class="btn btn-accent" onclick="saveDept()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Excel出力オプションモーダル -->
+<div class="modal-bg" id="xlsxOptionModal">
+  <div class="modal" style="max-width:420px">
+    <h3>⬇ Excel出力オプション</h3>
+    <div style="margin-bottom:1rem">
+      <div class="form-item" style="margin-bottom:.75rem">
+        <label>部署で絞り込み</label>
+        <select id="xlsDeptFilter" onchange="updateXlsPreview()" style="width:100%;border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;font-family:'Noto Sans JP',sans-serif">
+          <option value="">全部署</option>
+        </select>
+      </div>
+      <div class="form-item" style="margin-bottom:.75rem">
+        <label>雇用区分で絞り込み</label>
+        <div style="display:flex;gap:12px;padding:6px 0;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
+            <input type="checkbox" id="xlsChkFulltime" checked onchange="updateXlsPreview()"> 正社員
+          </label>
+          <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
+            <input type="checkbox" id="xlsChkContract" checked onchange="updateXlsPreview()"> 契約社員
+          </label>
+          <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
+            <input type="checkbox" id="xlsChkPart" checked onchange="updateXlsPreview()"> パート
+          </label>
+        </div>
+      </div>
+      <div style="background:var(--surface2);border-radius:7px;padding:.6rem 1rem;font-size:13px;color:var(--text2)" id="xlsPreview">
+        対象：— 名
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn" onclick="hideXlsOption()">キャンセル</button>
+      <button class="btn btn-success" onclick="executeXlsDownload()">⬇ ダウンロード</button>
     </div>
   </div>
 </div>
@@ -673,10 +877,33 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
 <div id="toast"></div>
 
 <script>
+// ===== FIREBASE =====
+const firebaseConfig = {
+  apiKey: "AIzaSyBbn6MyMC769f6ddk3VwH48q4Cw02woCUk",
+  authDomain: "timecard-saas.firebaseapp.com",
+  projectId: "timecard-saas",
+  storageBucket: "timecard-saas.firebasestorage.app",
+  messagingSenderId: "477429118728",
+  appId: "1:477429118728:web:8fb3a2bb688b8dacb95ebd"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
 // ===== CONSTANTS =====
-const USERS = [{id:'admin',pw:'miedc2024',name:'管理者',role:'admin'}];
 const DAYS = ['日','月','火','水','木','金','土'];
 const LS_KEY = 'tc_app_v2';
+const USERS_KEY = 'tc_users_v1';
+
+// ユーザー管理（Firestore + localStorage）
+function getUsers() {
+  try { return JSON.parse(localStorage.getItem(USERS_KEY)) || null; } catch(e) { return null; }
+}
+function saveUsersToLS(users) {
+  localStorage.setItem(USERS_KEY, JSON.stringify(users));
+  db.collection('timecard').doc('users').set({ users }).catch(e => console.error('Firestore users:', e));
+}
+let USERS = getUsers() || [{id:'admin', pw:'miedc2024', name:'管理者'}];
+if (!getUsers()) saveUsersToLS(USERS);
 
 // ===== STATE =====
 let state = {
@@ -705,26 +932,63 @@ let currentEmpId = null;
 let editEmpId = null;
 const now = new Date();
 
-// ===== LOCALSTORAGE =====
+// ===== STORAGE (Firestore + localStorage fallback) =====
 function saveState() {
-  try {
-    localStorage.setItem(LS_KEY, JSON.stringify(state));
-    showSaveIndicator();
-  } catch(e) {
-    if(e.name === 'QuotaExceededError') {
-      alert('保存容量が上限に達しました。古いデータを削除してください。');
-    }
-  }
+  // localStorageキャッシュ
+  try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch(e) {}
+  // Firestoreへ非同期保存
+  db.collection('timecard').doc('data').set(state)
+    .then(() => showSaveIndicator())
+    .catch(e => { console.error('Firestore save:', e); showSaveIndicator(); });
 }
 
 function loadState() {
+  // localStorageから読み込み（Firestoreが使えない場合のフォールバック）
   try {
     const saved = localStorage.getItem(LS_KEY);
-    if(saved) {
-      const parsed = JSON.parse(saved);
-      state = {...state, ...parsed};
-    }
+    if(saved) { state = {...state, ...JSON.parse(saved)}; }
   } catch(e) { console.warn('State load failed', e); }
+}
+
+async function loadStateFromFirestore() {
+  try {
+    const snap = await db.collection('timecard').doc('data').get();
+    if (snap.exists) {
+      state = {...state, ...snap.data()};
+      // localStorageにもキャッシュ
+      try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch(e) {}
+      return true;
+    }
+  } catch(e) { console.warn('Firestore load failed, using localStorage:', e); }
+  return false;
+}
+
+async function loadUsersFromFirestore() {
+  try {
+    const snap = await db.collection('timecard').doc('users').get();
+    if (snap.exists && snap.data().users) {
+      USERS = snap.data().users;
+      localStorage.setItem(USERS_KEY, JSON.stringify(USERS));
+    }
+  } catch(e) { console.warn('Firestore users load failed:', e); }
+}
+
+// 社員番号順にソートした従業員一覧を返す
+function sortedEmps() {
+  return [...state.empMasters].sort((a, b) => {
+    const na = String(a.empNo || ''), nb = String(b.empNo || '');
+    const ai = parseInt(na), bi = parseInt(nb);
+    if (!isNaN(ai) && !isNaN(bi)) return ai - bi;
+    if (na && !nb) return -1;
+    if (!na && nb) return 1;
+    return na.localeCompare(nb, 'ja');
+  });
+}
+
+// 次の社員番号を自動採番（既存の最大値+1）
+function nextEmpNo() {
+  const nums = state.empMasters.map(e => parseInt(e.empNo)).filter(n => !isNaN(n));
+  return nums.length ? String(Math.max(...nums) + 1) : '1';
 }
 
 function showSaveIndicator() {
@@ -734,16 +998,29 @@ function showSaveIndicator() {
 }
 
 // ===== INIT =====
-loadState();
-currentMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-document.getElementById('yearMonth').value = currentMonth;
+(async function() {
+  // Firestoreからデータ読込（失敗時はlocalStorageフォールバック）
+  const fromCloud = await loadStateFromFirestore();
+  if (!fromCloud) loadState();
+  await loadUsersFromFirestore();
+
+  currentMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  document.getElementById('yearMonth').value = currentMonth;
+
+  // ローディング非表示→ログイン画面表示
+  document.getElementById('loadingScreen').style.display = 'none';
+  document.getElementById('loginScreen').style.display = 'flex';
+})();
 
 // ===== LOGIN =====
 function doLogin() {
   const id = document.getElementById('loginId').value.trim();
   const pw = document.getElementById('loginPw').value;
-  const user = USERS.find(u => u.id===id && u.pw===pw);
-  if(!user) { document.getElementById('loginErr').classList.add('show'); return; }
+  const errEl = document.getElementById('loginErr');
+  // 名前でも検索できるようにIDまたは氏名で照合
+  const user = USERS.find(u => (u.id===id || u.name===id) && u.pw===pw);
+  if(!user) { errEl.classList.add('show'); return; }
+  errEl.classList.remove('show');
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('appScreen').style.display = 'block';
   document.getElementById('userLabel').textContent = user.name;
@@ -758,6 +1035,93 @@ function doLogout() {
   document.getElementById('loginId').value = '';
   document.getElementById('loginPw').value = '';
   document.getElementById('loginErr').classList.remove('show');
+}
+
+// ===== ユーザー管理 =====
+let editUserIdx = -1;
+
+function renderUsers() {
+  const el = document.getElementById('userListTable');
+  if (!el) return;
+  if (!USERS.length) { el.innerHTML = '<p style="color:var(--text2);font-size:13px">ユーザーがいません</p>'; return; }
+  let html = `<table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr style="background:var(--surface2);text-align:left">
+      <th style="padding:7px 10px;border:1px solid var(--border);width:140px">ユーザーID</th>
+      <th style="padding:7px 10px;border:1px solid var(--border)">氏名</th>
+      <th style="padding:7px 10px;border:1px solid var(--border);width:140px;text-align:center">操作</th>
+    </tr></thead><tbody>`;
+  USERS.forEach((u, i) => {
+    html += `<tr>
+      <td style="padding:7px 10px;border:1px solid var(--border);font-family:var(--mono)">${u.id}</td>
+      <td style="padding:7px 10px;border:1px solid var(--border)">${u.name}</td>
+      <td style="padding:7px 10px;border:1px solid var(--border);text-align:center">
+        <button class="btn btn-sm" onclick="showUserForm(${i})">編集</button>
+        ${USERS.length > 1 ? `<button class="btn btn-sm btn-danger" style="margin-left:4px" onclick="deleteUser(${i})">削除</button>` : ''}
+      </td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
+function showUserForm(idx) {
+  editUserIdx = idx;
+  const form = document.getElementById('userForm');
+  form.style.display = 'block';
+  if (idx === -1) {
+    // 新規
+    document.getElementById('uId').value = '';
+    document.getElementById('uId').disabled = false;
+    document.getElementById('uName').value = '';
+    document.getElementById('uPw').value = '';
+    document.getElementById('uPwRequired').style.display = '';
+    document.getElementById('uPwOptional').style.display = 'none';
+  } else {
+    // 編集
+    const u = USERS[idx];
+    document.getElementById('uId').value = u.id;
+    document.getElementById('uId').disabled = true;
+    document.getElementById('uName').value = u.name;
+    document.getElementById('uPw').value = '';
+    document.getElementById('uPwRequired').style.display = 'none';
+    document.getElementById('uPwOptional').style.display = '';
+  }
+  document.getElementById('uName').focus();
+  document.getElementById('userForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function saveUser() {
+  const id   = document.getElementById('uId').value.trim();
+  const name = document.getElementById('uName').value.trim();
+  const pw   = document.getElementById('uPw').value;
+
+  if (!name) { alert('氏名を入力してください'); return; }
+
+  if (editUserIdx === -1) {
+    // 新規
+    if (!id) { alert('ユーザーIDを入力してください'); return; }
+    if (!pw) { alert('パスワードを入力してください'); return; }
+    if (USERS.some(u => u.id === id)) { alert('そのユーザーIDは既に使われています'); return; }
+    USERS.push({ id, name, pw });
+  } else {
+    // 編集
+    USERS[editUserIdx].name = name;
+    if (pw) USERS[editUserIdx].pw = pw;
+  }
+
+  saveUsersToLS(USERS);
+  document.getElementById('userForm').style.display = 'none';
+  renderUsers();
+  toast('ユーザーを保存しました');
+}
+
+function deleteUser(idx) {
+  if (USERS.length <= 1) { alert('最低1名のユーザーが必要です'); return; }
+  if (!confirm(`「${USERS[idx].name}」を削除しますか？`)) return;
+  USERS.splice(idx, 1);
+  saveUsersToLS(USERS);
+  renderUsers();
+  toast('ユーザーを削除しました');
 }
 
 function initApp() {
@@ -780,6 +1144,7 @@ function initApp() {
   updateLockUI();
   updateGuide();
   renderVacationAlertBanner();
+  updateApiKeyStatus();
 }
 
 function selectMonth(ym) {
@@ -800,10 +1165,11 @@ function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
-  const tabs = {attendance:0,calendar:1,check:2,vacation:3,history:4,master:5,dept:6,settings:7};
+  const tabs = {attendance:0,calendar:1,check:2,vacation:3,history:4,master:5,dept:6,overtime:7,settings:8};
   document.querySelectorAll('.nav-tab')[tabs[name]].classList.add('active');
   if(name==='history')  renderHistory();
   if(name==='check')    renderCheck();
+  if(name==='overtime') { document.getElementById('otMonth').value=currentMonth; renderOvertimeAnalysis(); }
   if(name==='calendar') {
     // 勤怠入力の月をカレンダーに同期
     document.getElementById('calMonth').value = currentMonth;
@@ -859,12 +1225,12 @@ function renderEmpTabs() {
   const monthData = state.monthData[currentMonth] || {};
   const locks = state.locks || {};
   const lockKey = `${currentMonth}`;
-  state.empMasters.forEach(emp => {
+  sortedEmps().forEach(emp => {
     const hasData = (monthData[String(emp.id)] || monthData[emp.id] || []).length > 0;
     const isConfirmed = locks[lockKey] && (locks[lockKey][emp.id] || locks[lockKey][String(emp.id)]);
     const btn = document.createElement('button');
     btn.className = `emp-tab${String(emp.id)===String(currentEmpId)?' active':''}${hasData?' has-data':''}${isConfirmed?' confirmed':''}`;
-    btn.innerHTML = `<span class="dot"></span>${emp.name}`;
+    btn.innerHTML = `<span class="dot"></span>${emp.empNo?'<span style="font-size:10px;opacity:.6;margin-right:2px">'+emp.empNo+'</span>':''}${emp.name}`;
     btn.onclick = () => selectEmp(emp.id);
     container.appendChild(btn);
   });
@@ -1342,7 +1708,7 @@ function calcSummary() {
 function renderAllSummary() {
   const container = document.getElementById('allSummary');
   const monthData = state.monthData[currentMonth] || {};
-  const withData = state.empMasters.filter(e => (monthData[String(e.id)]||monthData[e.id]||[]).length>0);
+  const withData = sortedEmps().filter(e => (monthData[String(e.id)]||monthData[e.id]||[]).length>0);
   if(!withData.length) {
     container.innerHTML = `<div style="text-align:center;padding:1.5rem;color:var(--text2);font-size:13px">データを入力するとここに集計が表示されます</div>`;
     return;
@@ -1426,29 +1792,88 @@ function clearOldData() {
 }
 
 // ===== EXCEL =====
-function downloadAll() { downloadMonth(currentMonth); }
+// ===== Excel出力オプション =====
+let xlsTargetYm = '';
+
+function downloadAll() {
+  xlsTargetYm = currentMonth;
+  showXlsOption();
+}
+
+function showXlsOption() {
+  // 部署セレクトを最新化
+  const sel = document.getElementById('xlsDeptFilter');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">全部署</option>';
+  state.depts.forEach(d => {
+    const o = document.createElement('option');
+    o.value = d; o.textContent = d;
+    sel.appendChild(o);
+  });
+  sel.value = cur;
+  updateXlsPreview();
+  document.getElementById('xlsxOptionModal').classList.add('show');
+}
+function hideXlsOption() {
+  document.getElementById('xlsxOptionModal').classList.remove('show');
+}
+
+function getXlsFilteredEmps(ym) {
+  const dept = document.getElementById('xlsDeptFilter').value;
+  const chkFull = document.getElementById('xlsChkFulltime').checked;
+  const chkCont = document.getElementById('xlsChkContract').checked;
+  const chkPart = document.getElementById('xlsChkPart').checked;
+  const monthData = state.monthData[ym] || {};
+  return sortedEmps().filter(e => {
+    if (dept && e.dept !== dept) return false;
+    const type = e.empType || 'fulltime';
+    if (type === 'fulltime' && !chkFull) return false;
+    if (type === 'contract' && !chkCont) return false;
+    if (type === 'part' && !chkPart) return false;
+    return (monthData[String(e.id)] || monthData[e.id] || []).length > 0;
+  });
+}
+
+function updateXlsPreview() {
+  const emps = getXlsFilteredEmps(xlsTargetYm);
+  const dept = document.getElementById('xlsDeptFilter').value;
+  const deptLabel = dept ? `「${dept}」` : '全部署';
+  document.getElementById('xlsPreview').innerHTML =
+    `対象：<strong>${emps.length}名</strong>（${deptLabel} / ${xlsTargetYm.replace('-','年')}月）`;
+}
+
+function executeXlsDownload() {
+  const emps = getXlsFilteredEmps(xlsTargetYm);
+  if (!emps.length) { alert('対象のデータがありません'); return; }
+  hideXlsOption();
+  downloadMonthFiltered(xlsTargetYm, emps);
+}
 
 function downloadMonth(ym) {
+  xlsTargetYm = ym;
+  showXlsOption();
+}
+
+function downloadMonthFiltered(ym, withData) {
   const monthData = state.monthData[ym] || {};
-  const withData = state.empMasters.filter(e => (monthData[String(e.id)]||monthData[e.id]||[]).length>0);
   if(!withData.length) { alert('データがありません'); return; }
   const wb = XLSX.utils.book_new();
 
   // サマリー
-  const sumData = [['氏名','部署','対象年月','出勤日数','総実働(h)','早出残業(h)','夕刻残業(h)','遅刻早退(h)','要確認','残業対象']];
+  const sumData = [['社員番号','氏名','部署','対象年月','出勤日数','総実働(h)','早出残業(h)','夕刻残業(h)','遅刻早退(h)','要確認','残業対象']];
   withData.forEach(emp => {
     const rows = monthData[String(emp.id)]||monthData[emp.id]||[];
     let days=0,total=0,early=0,ot=0,late=0,issues=0;
     rows.forEach(r=>{
       if(r.clockIn&&r.clockOut){days++;const t=calcTimes(r.clockIn,r.clockOut,emp);if(t.actual!=null){total+=t.actual;early+=t.early||0;if(t.overtime!=null)ot+=t.overtime;if(t.late!=null)late+=t.late;}}else{issues++;}
     });
-    sumData.push([emp.name,emp.dept,ym,days,
+    sumData.push([emp.empNo||'',emp.name,emp.dept,ym,days,
       parseFloat(total.toFixed(2)),parseFloat(early.toFixed(2)),
       emp.hasOT?parseFloat(ot.toFixed(2)):'対象外',
       parseFloat(late.toFixed(2)),issues,emp.hasOT?'あり':'なし']);
   });
   const wss = XLSX.utils.aoa_to_sheet(sumData);
-  wss['!cols']=[{wch:14},{wch:10},{wch:10},{wch:10},{wch:12},{wch:14},{wch:14},{wch:14},{wch:10},{wch:10}];
+  wss['!cols']=[{wch:10},{wch:14},{wch:10},{wch:10},{wch:10},{wch:12},{wch:14},{wch:14},{wch:14},{wch:10},{wch:10}];
   XLSX.utils.book_append_sheet(wb, wss, '全員サマリー');
 
   // 個人別
@@ -1514,13 +1939,15 @@ function downloadMonth(ym) {
     XLSX.utils.book_append_sheet(wb,wsAt,sn+'_出勤簿');
   });
 
-  XLSX.writeFile(wb, `勤怠_${ym}.xlsx`);
+  const dept = document.getElementById('xlsDeptFilter') ? document.getElementById('xlsDeptFilter').value : '';
+  const suffix = dept ? `_${dept}` : '';
+  XLSX.writeFile(wb, `勤怠_${ym}${suffix}.xlsx`);
   toast('Excelをダウンロードしました！');
 }
 
 // ===== MASTER =====
 function contractStatus(emp) {
-  if(emp.empType !== 'contract' || !emp.contractEnd) return null;
+  if((emp.empType !== 'contract' && emp.empType !== 'part') || !emp.contractEnd) return null;
   const today = now.toISOString().slice(0,10);
   const endDate = new Date(emp.contractEnd);
   const daysLeft = Math.floor((endDate - now) / 86400000);
@@ -1535,7 +1962,7 @@ function renderContractAlertBanner() {
   const banner = document.getElementById('contractAlertBanner');
   if(!banner) return;
   const contracts = state.empMasters
-    .filter(e => e.empType === 'contract' && e.contractEnd)
+    .filter(e => (e.empType === 'contract' || e.empType === 'part') && e.contractEnd)
     .map(e => ({ emp: e, status: contractStatus(e) }))
     .filter(x => x.status && x.status.days <= 60)
     .sort((a,b) => a.status.days - b.status.days);
@@ -1554,13 +1981,13 @@ function renderEmpMaster() {
   renderContractAlertBanner();
   const tbody = document.getElementById('empMasterBody');
   tbody.innerHTML = '';
-  state.empMasters.forEach(emp => {
+  sortedEmps().forEach(emp => {
     const typeLabels = { fulltime:'正社員', contract:'契約社員', part:'パート' };
     const typeBadges = { fulltime:'badge-gray', contract:'badge-warn', part:'badge-info' };
     const typeLabel = typeLabels[emp.empType||'fulltime'] || '正社員';
     const typeBadge = typeBadges[emp.empType||'fulltime'] || 'badge-gray';
     const cs = contractStatus(emp);
-    const contractEndCell = emp.empType === 'contract' && emp.contractEnd
+    const contractEndCell = (emp.empType === 'contract' || emp.empType === 'part') && emp.contractEnd
       ? `<span style="font-family:var(--mono);font-size:12px;color:${cs?cs.color:'var(--text)'}">${emp.contractEnd}</span>`
       : '<span style="color:var(--text2)">—</span>';
     const contractStatusCell = cs
@@ -1569,6 +1996,7 @@ function renderEmpMaster() {
     const tr = document.createElement('tr');
     if(cs && cs.days <= 60) tr.style.background = cs.urgent ? '#FFF5F5' : '#FFFBF0';
     tr.innerHTML = `
+      <td style="font-family:var(--mono);font-weight:500;color:var(--text2)">${emp.empNo||'—'}</td>
       <td style="font-weight:500">${emp.name}</td>
       <td>${emp.dept||'—'}</td>
       <td><span class="badge ${typeBadge}">${typeLabel}</span></td>
@@ -1586,13 +2014,14 @@ function renderEmpMaster() {
 
 function toggleContractFields() {
   const type = document.getElementById('mEmpType').value;
-  document.getElementById('contractFields').style.display = type === 'contract' ? 'block' : 'none';
+  document.getElementById('contractFields').style.display = (type === 'contract' || type === 'part') ? 'block' : 'none';
 }
 
 function showEmpForm(id=null) {
   editEmpId=id;
   document.getElementById('empFormTitle').textContent=id?'従業員編集':'従業員登録';
   const emp=id?state.empMasters.find(e=>e.id===id):null;
+  document.getElementById('mEmpNo').value=emp?emp.empNo||'':nextEmpNo();
   document.getElementById('mEmpName').value=emp?emp.name:'';
   document.getElementById('mEmpHours').value=emp?emp.stdHours:8;
   document.getElementById('mEmpOT').checked=emp?emp.hasOT:true;
@@ -1619,28 +2048,140 @@ function saveEmp(){
   if(!name){alert('氏名を入力してください');return;}
   const empType = document.getElementById('mEmpType').value;
   const data={
+    empNo: document.getElementById('mEmpNo').value.trim(),
     name,
     dept:document.getElementById('mEmpDept').value,
     empType,
     stdHours:parseFloat(document.getElementById('mEmpHours').value)||8,
     hasOT:document.getElementById('mEmpOT').checked,
-    contractStart: empType==='contract' ? document.getElementById('mContractStart').value : '',
-    contractEnd:   empType==='contract' ? document.getElementById('mContractEnd').value : '',
-    contractNote:  empType==='contract' ? document.getElementById('mContractNote').value : '',
+    contractStart: (empType==='contract'||empType==='part') ? document.getElementById('mContractStart').value : '',
+    contractEnd:   (empType==='contract'||empType==='part') ? document.getElementById('mContractEnd').value : '',
+    contractNote:  (empType==='contract'||empType==='part') ? document.getElementById('mContractNote').value : '',
   };
   if(editEmpId){Object.assign(state.empMasters.find(e=>e.id===editEmpId),data);}
   else{data.id=++state.empIdSeq;state.empMasters.push(data);}
   hideEmpForm();saveState();renderEmpMaster();renderEmpTabs();toast(editEmpId?'更新しました':'登録しました');
 }
 
+// ===== 従業員マスター Excel入出力 =====
+function exportEmpMasterExcel() {
+  const header = ['社員番号','氏名','部署','雇用区分','所定労働時間(h)','残業対象','契約開始日','契約終了日','備考'];
+  const typeMap = { fulltime:'正社員', contract:'契約社員', part:'パート' };
+  const rows = [header];
+  sortedEmps().forEach(e => {
+    rows.push([
+      e.empNo || '',
+      e.name || '',
+      e.dept || '',
+      typeMap[e.empType || 'fulltime'] || '正社員',
+      e.stdHours || 8,
+      e.hasOT ? 'あり' : 'なし',
+      e.contractStart || '',
+      e.contractEnd || '',
+      e.contractNote || ''
+    ]);
+  });
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [{wch:10},{wch:14},{wch:12},{wch:12},{wch:14},{wch:10},{wch:12},{wch:12},{wch:20}];
+  // ヘッダー行に色をつける（SheetJSでの簡易スタイル）
+  XLSX.utils.book_append_sheet(wb, ws, '従業員マスター');
+  XLSX.writeFile(wb, '従業員マスター.xlsx');
+  toast('Excelを出力しました');
+}
+
+function importEmpMasterExcel(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = '';
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      if (rows.length < 2) { alert('データが見つかりません'); return; }
+
+      // ヘッダー行からカラム位置を特定（順番に依存しない）
+      const headerRow = rows[0].map(h => String(h).trim());
+      const col = {
+        empNo:    headerRow.findIndex(h => h.includes('社員番号')),
+        name:     headerRow.findIndex(h => h.includes('氏名')),
+        dept:     headerRow.findIndex(h => h.includes('部署')),
+        empType:  headerRow.findIndex(h => h.includes('雇用区分')),
+        stdHours: headerRow.findIndex(h => h.includes('所定労働')),
+        hasOT:    headerRow.findIndex(h => h.includes('残業対象')),
+        contractStart: headerRow.findIndex(h => h.includes('契約開始')),
+        contractEnd:   headerRow.findIndex(h => h.includes('契約終了')),
+        contractNote:  headerRow.findIndex(h => h.includes('備考')),
+      };
+      if (col.name < 0) { alert('「氏名」列が見つかりません。\n出力したExcelのフォーマットを確認してください。'); return; }
+
+      const typeRevMap = { '正社員':'fulltime', '契約社員':'contract', 'パート':'part' };
+      const newEmps = [];
+      let addCount = 0, updateCount = 0;
+
+      for (let i = 1; i < rows.length; i++) {
+        const r = rows[i];
+        const name = col.name >= 0 ? String(r[col.name] || '').trim() : '';
+        if (!name) continue;
+
+        const empNo = col.empNo >= 0 ? String(r[col.empNo] || '').trim() : '';
+        const dept  = col.dept >= 0 ? String(r[col.dept] || '').trim() : '';
+        const empTypeRaw = col.empType >= 0 ? String(r[col.empType] || '').trim() : '正社員';
+        const empType = typeRevMap[empTypeRaw] || 'fulltime';
+        const stdHours = col.stdHours >= 0 ? parseFloat(r[col.stdHours]) || 8 : 8;
+        const hasOTRaw = col.hasOT >= 0 ? String(r[col.hasOT] || '').trim() : 'あり';
+        const hasOT = hasOTRaw !== 'なし';
+        const contractStart = col.contractStart >= 0 ? String(r[col.contractStart] || '').trim() : '';
+        const contractEnd   = col.contractEnd >= 0 ? String(r[col.contractEnd] || '').trim() : '';
+        const contractNote  = col.contractNote >= 0 ? String(r[col.contractNote] || '').trim() : '';
+
+        // 既存の社員番号と照合して更新 or 新規追加
+        const existing = empNo ? state.empMasters.find(e => String(e.empNo) === empNo) : null;
+        if (existing) {
+          Object.assign(existing, { empNo, name, dept, empType, stdHours, hasOT, contractStart, contractEnd, contractNote });
+          updateCount++;
+        } else {
+          newEmps.push({ id: ++state.empIdSeq, empNo, name, dept, empType, stdHours, hasOT, contractStart, contractEnd, contractNote });
+          addCount++;
+        }
+      }
+      state.empMasters.push(...newEmps);
+
+      // 新規追加時に部署マスターに自動追加
+      newEmps.forEach(e => {
+        if (e.dept && !state.depts.includes(e.dept)) state.depts.push(e.dept);
+      });
+
+      saveState();
+      renderEmpMaster();
+      renderEmpTabs();
+      renderDeptMaster();
+      toast(`取込完了：新規追加 ${addCount}名、更新 ${updateCount}名`);
+    } catch(err) {
+      alert('読み込みに失敗しました。\nExcelファイルを確認してください。\n' + err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
 // ===== DEPT =====
+let editDeptIndex = null;
+
 function renderDeptMaster(){
   const tbody=document.getElementById('deptBody');
   tbody.innerHTML='';
   state.depts.forEach((d,i)=>{
+    const empCount = state.empMasters.filter(e => e.dept === d).length;
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td style="font-weight:500">${d}</td>
-      <td><button class="btn btn-sm btn-danger" onclick="deleteDept(${i})">削除</button></td>`;
+    tr.innerHTML=`
+      <td style="font-weight:500">${d}</td>
+      <td style="color:var(--text2);font-size:12px">${empCount}名</td>
+      <td style="display:flex;gap:6px">
+        <button class="btn btn-sm" onclick="showDeptForm(${i})">編集</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteDept(${i})">削除</button>
+      </td>`;
     tbody.appendChild(tr);
   });
 }
@@ -1652,17 +2193,42 @@ function populateDeptSelect(selId){
   state.depts.forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=d;sel.appendChild(o);});
   sel.value=cur;
 }
-function showDeptForm(){document.getElementById('mDeptName').value='';document.getElementById('deptFormModal').classList.add('show');}
+function showDeptForm(idx=null){
+  editDeptIndex = idx;
+  const isEdit = idx !== null;
+  document.getElementById('deptFormTitle').textContent = isEdit ? '部署名を変更' : '部署登録';
+  document.getElementById('mDeptName').value = isEdit ? state.depts[idx] : '';
+  document.getElementById('deptFormModal').classList.add('show');
+}
 function hideDeptForm(){document.getElementById('deptFormModal').classList.remove('show');}
 function saveDept(){
   const name=document.getElementById('mDeptName').value.trim();
   if(!name){alert('部署名を入力してください');return;}
-  if(state.depts.includes(name)){alert('すでに登録されています');return;}
-  state.depts.push(name);hideDeptForm();saveState();renderDeptMaster();toast('登録しました');
+  if(editDeptIndex !== null){
+    // 編集：旧名称を新名称に差し替え（従業員データも連動更新）
+    const oldName = state.depts[editDeptIndex];
+    if(name !== oldName && state.depts.includes(name)){alert('同じ部署名がすでに存在します');return;}
+    state.depts[editDeptIndex] = name;
+    state.empMasters.forEach(e => { if(e.dept === oldName) e.dept = name; });
+    toast('部署名を変更しました');
+  } else {
+    // 新規登録
+    if(state.depts.includes(name)){alert('すでに登録されています');return;}
+    state.depts.push(name);
+    toast('登録しました');
+  }
+  editDeptIndex = null;
+  hideDeptForm();saveState();renderDeptMaster();populateDeptSelect('mEmpDept');
 }
 function deleteDept(i){
-  if(!confirm(`「${state.depts[i]}」を削除しますか？`))return;
-  state.depts.splice(i,1);saveState();renderDeptMaster();toast('削除しました');
+  const name = state.depts[i];
+  const empCount = state.empMasters.filter(e => e.dept === name).length;
+  const msg = empCount > 0
+    ? `「${name}」を削除しますか？\n※この部署に所属する ${empCount}名 の部署欄が空欄になります。`
+    : `「${name}」を削除しますか？`;
+  if(!confirm(msg))return;
+  if(empCount > 0) state.empMasters.forEach(e => { if(e.dept === name) e.dept = ''; });
+  state.depts.splice(i,1);saveState();renderDeptMaster();renderEmpMaster();toast('削除しました');
 }
 
 // ===== SETTINGS =====
@@ -1672,7 +2238,7 @@ function renderSettingsUI(){
   document.getElementById('cfg-early').value=state.cfg.earlyStart;
   document.getElementById('cfg-otstart').value=state.cfg.otStart;
   document.getElementById('cfg-closing').value=String(state.cfg.closingDay||20);
-  renderBreakSlots();renderSettingsSummary();
+  renderBreakSlots();renderSettingsSummary();renderUsers();
 }
 function renderBreakSlots(){
   const c=document.getElementById('breakSlots');c.innerHTML='';
@@ -1726,6 +2292,503 @@ function importData(input){
   };
   reader.readAsText(file);
   input.value='';
+}
+
+// ===== CLAUDE API / スキャン取込 =====
+
+function saveApiKey() {
+  const key = document.getElementById('cfg-api-key').value.trim();
+  if (!key) { alert('APIキーを入力してください'); return; }
+  state.cfg.claudeApiKey = key;
+  saveState();
+  updateApiKeyStatus();
+  toast('APIキーを保存しました');
+}
+
+function updateApiKeyStatus() {
+  const el = document.getElementById('apiKeyStatus');
+  if (!el) return;
+  const key = state.cfg.claudeApiKey || '';
+  if (key) {
+    el.textContent = '✅ 設定済み（' + key.slice(0,12) + '…）';
+    el.style.color = 'var(--success)';
+  } else {
+    el.textContent = '未設定';
+    el.style.color = 'var(--text2)';
+  }
+  const keyInput = document.getElementById('cfg-api-key');
+  if (keyInput && key) keyInput.value = key;
+}
+
+function toggleScanCard() {
+  const body = document.getElementById('scanCardBody');
+  const toggle = document.getElementById('scanCardToggle');
+  const isOpen = body.style.display !== 'none';
+  body.style.display = isOpen ? 'none' : 'block';
+  toggle.textContent = isOpen ? '▶ 開く' : '▼ 閉じる';
+  if (!isOpen) initScanCard();
+}
+
+function initScanCard() {
+  // カード記載月を現在の対象月にセット
+  document.getElementById('scanCardMonth').value = currentMonth;
+  // 従業員セレクトを更新
+  const sel = document.getElementById('scanEmpId');
+  sel.innerHTML = '';
+  sortedEmps().forEach(e => {
+    const opt = document.createElement('option');
+    opt.value = e.id;
+    opt.textContent = (e.empNo ? e.empNo + ' ' : '') + e.name;
+    if (String(e.id) === String(currentEmpId)) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  updateApiKeyStatus();
+}
+
+let scanPdfBase64 = null;
+let scanResultData = null;
+
+function onScanFileSelect(input) {
+  const file = input.files[0];
+  if (!file) return;
+  document.getElementById('scanFileName').textContent = file.name;
+  const reader = new FileReader();
+  reader.onload = e => {
+    // base64のdata:...部分を除去
+    scanPdfBase64 = e.target.result.split(',')[1];
+    document.getElementById('scanRunBtn').disabled = false;
+  };
+  reader.readAsDataURL(file);
+}
+
+function buildScanPrompt(cardMonth) {
+  // cardMonth = "YYYY-MM"（カードに記載の月）
+  const [cy, cm] = cardMonth.split('-').map(Number);
+  const prevM = cm === 1 ? 12 : cm - 1;
+  const prevY = cm === 1 ? cy - 1 : cy;
+  const prevYM = `${prevY}-${String(prevM).padStart(2,'0')}`;
+  const currYM = cardMonth;
+
+  return `アマノBカード形式のタイムカードを読み取ってください。
+
+【締め日ルール：20日締め】
+このタイムカードは「${cm}月分」です。以下の日付を付けてください：
+- 表面（21日〜月末） = 前月 ${prevYM} の日付
+- 裏面（1日〜20日） = 当月 ${currYM} の日付
+
+日付の例：
+- 表面の「21」→ "${prevYM}-21"
+- 表面の「28」→ "${prevYM}-28"
+- 裏面の「1」→  "${currYM}-01"
+- 裏面の「6」→  "${currYM}-06"
+- 裏面の「20」→ "${currYM}-20"
+
+【カラム対応】
+- 「定時出」列 = clockIn（出勤打刻）
+- 「時間外」列 = clockOut（退勤打刻）
+- 時刻はHH:MM形式（例："07:47"）
+
+【ルール】
+- 赤い印鑑がある日 = 休日。打刻があれば note:"休日出勤"、打刻がなければ出力しない
+- 打刻が全くない日は出力しない
+- 曜日は日付確認に使うこと（日付の誤りを防ぐ）
+- JSON配列のみ返す（説明文・前置き一切不要）
+
+【出力形式】
+[{"date":"YYYY-MM-DD","clockIn":"HH:MM","clockOut":"HH:MM","note":""}]`;
+}
+
+async function runScan() {
+  const apiKey = state.cfg.claudeApiKey;
+  if (!apiKey) { alert('設定ページでClaude APIキーを登録してください'); return; }
+  if (!scanPdfBase64) { alert('PDFファイルを選択してください'); return; }
+
+  const cardMonth = document.getElementById('scanCardMonth').value;
+  if (!cardMonth) { alert('カード記載月を選択してください'); return; }
+
+  const btn = document.getElementById('scanRunBtn');
+  const status = document.getElementById('scanStatus');
+  btn.disabled = true;
+  status.textContent = '🔄 AIが読み取り中...（10〜30秒）';
+  document.getElementById('scanResult').style.display = 'none';
+  scanResultData = null;
+
+  try {
+    const prompt = buildScanPrompt(cardMonth);
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 2048,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'document',
+              source: { type: 'base64', media_type: 'application/pdf', data: scanPdfBase64 }
+            },
+            { type: 'text', text: prompt }
+          ]
+        }]
+      })
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error?.message || `APIエラー (${response.status})`);
+    }
+
+    const data = await response.json();
+    const text = data.content?.[0]?.text || '';
+
+    // JSONを抽出（余分なテキストが入った場合に備えて）
+    const match = text.match(/\[[\s\S]*\]/);
+    if (!match) throw new Error('JSONが見つかりませんでした。\n\nAIの返答：\n' + text.slice(0, 200));
+
+    const rows = JSON.parse(match[0]);
+    if (!Array.isArray(rows)) throw new Error('JSONの形式が不正です');
+
+    scanResultData = rows;
+    showScanPreview(rows, cardMonth);
+    status.textContent = `✅ ${rows.length}件を読み取りました`;
+    document.getElementById('scanResult').style.display = 'block';
+
+  } catch (e) {
+    status.textContent = '❌ エラー：' + e.message;
+    console.error(e);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function showScanPreview(rows, cardMonth) {
+  const [cy, cm] = cardMonth.split('-').map(Number);
+  const prevM = cm === 1 ? 12 : cm - 1;
+  const prevY = cm === 1 ? cy - 1 : cy;
+
+  let html = `<table class="master-table" style="font-size:12px">
+    <thead><tr><th>日付</th><th>曜日</th><th>出勤</th><th>退勤</th><th>備考</th></tr></thead><tbody>`;
+
+  rows.forEach(r => {
+    const w = getWeekday(r.date);
+    const dayLabel = w >= 0 ? DAYS[w] : '';
+    const isHoliday = w === 0 || w === 6;
+    const bg = isHoliday ? 'background:var(--danger-bg)' : '';
+    // 前月/当月の色分け
+    const parts = r.date.split('-');
+    const isFront = parseInt(parts[1]) === prevM;
+    const side = isFront ? '<span style="font-size:10px;color:var(--text2)">表</span>' : '<span style="font-size:10px;color:var(--accent2)">裏</span>';
+    html += `<tr style="${bg}">
+      <td>${r.date} ${side}</td>
+      <td style="color:${w===0?'#A32D2D':w===6?'#185FA5':'inherit'}">${dayLabel}</td>
+      <td style="font-family:var(--mono)">${r.clockIn||'—'}</td>
+      <td style="font-family:var(--mono)">${r.clockOut||'—'}</td>
+      <td>${r.note||''}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  document.getElementById('scanPreviewTable').innerHTML = html;
+}
+
+function applyScanResult() {
+  if (!scanResultData || !scanResultData.length) return;
+  const empId = document.getElementById('scanEmpId').value;
+  const cardMonth = document.getElementById('scanCardMonth').value;
+
+  // 日付ごとに月を判定してグループ化（20日締めで表面=前月・裏面=当月）
+  const byMonth = {};
+  scanResultData.forEach(r => {
+    const ym = r.date.slice(0, 7); // "YYYY-MM"
+    if (!byMonth[ym]) byMonth[ym] = {};
+    byMonth[ym][r.date] = r;
+  });
+
+  // 月ごとに既存データとマージして保存
+  let totalCount = 0;
+  Object.entries(byMonth).forEach(([ym, newRows]) => {
+    if (!state.monthData[ym]) state.monthData[ym] = {};
+    const existing = state.monthData[ym][empId] || [];
+    const existingMap = {};
+    existing.forEach(r => { existingMap[r.date] = r; });
+    Object.assign(existingMap, newRows);
+    state.monthData[ym][empId] = Object.values(existingMap)
+      .sort((a, b) => a.date.localeCompare(b.date));
+    totalCount += Object.keys(newRows).length;
+  });
+
+  saveState();
+
+  // 当月（cardMonth）に切り替えて表示
+  currentMonth = cardMonth;
+  document.getElementById('yearMonth').value = cardMonth;
+  currentEmpId = parseInt(empId);
+  renderRecentMonths();
+  renderEmpTabs();
+  renderTable();
+  renderAllSummary();
+  updateDlBtn();
+  selectEmp(parseInt(empId));
+
+  const months = Object.keys(byMonth).join('・');
+  toast(`${totalCount}件を取り込みました（${months}）`);
+  clearScanResult();
+  toggleScanCard();
+}
+
+function clearScanResult() {
+  scanResultData = null;
+  scanPdfBase64 = null;
+  document.getElementById('scanResult').style.display = 'none';
+  document.getElementById('scanFileName').textContent = '未選択';
+  document.getElementById('scanStatus').textContent = '';
+  document.getElementById('scanRunBtn').disabled = true;
+  document.getElementById('scanPdfInput').value = '';
+}
+
+// ===== OVERTIME ANALYSIS =====
+
+// 指定月の全従業員残業データを計算してまとめる
+function calcOvertimeForMonth(ym) {
+  const monthData = state.monthData[ym] || {};
+  const results = [];
+  sortedEmps().forEach(emp => {
+    const rows = monthData[String(emp.id)] || monthData[emp.id] || [];
+    if (!rows.length) return;
+    let ot = 0, early = 0, actual = 0, days = 0;
+    rows.forEach(r => {
+      if (!r.clockIn || !r.clockOut) return;
+      const t = calcTimes(r.clockIn, r.clockOut, emp);
+      actual += r._actualOverride != null ? r._actualOverride : (t.actual || 0);
+      early  += r._earlyOverride  != null ? r._earlyOverride  : (t.early  || 0);
+      if (emp.hasOT) ot += r._otOverride != null ? r._otOverride : (t.overtime || 0);
+      days++;
+    });
+    results.push({
+      emp,
+      dept: emp.dept || '（未設定）',
+      days, actual: parseFloat(actual.toFixed(2)),
+      early: parseFloat(early.toFixed(2)),
+      ot: parseFloat(ot.toFixed(2)),
+      totalOt: parseFloat((early + ot).toFixed(2))
+    });
+  });
+  return results;
+}
+
+// 部署別に集計
+function groupByDept(empResults) {
+  const map = {};
+  empResults.forEach(r => {
+    if (!map[r.dept]) map[r.dept] = { dept: r.dept, headCount: 0, days: 0, actual: 0, early: 0, ot: 0, totalOt: 0 };
+    const d = map[r.dept];
+    d.headCount++; d.days += r.days; d.actual += r.actual;
+    d.early += r.early; d.ot += r.ot; d.totalOt += r.totalOt;
+  });
+  return Object.values(map).map(d => ({
+    ...d,
+    actual:  parseFloat(d.actual.toFixed(2)),
+    early:   parseFloat(d.early.toFixed(2)),
+    ot:      parseFloat(d.ot.toFixed(2)),
+    totalOt: parseFloat(d.totalOt.toFixed(2))
+  })).sort((a, b) => b.totalOt - a.totalOt);
+}
+
+function renderOvertimeAnalysis() {
+  const ym = document.getElementById('otMonth').value || currentMonth;
+  document.getElementById('otMonth').value = ym;
+
+  const empResults = calcOvertimeForMonth(ym);
+  const deptResults = groupByDept(empResults);
+
+  // ---- 全員トータルサマリー ----
+  const totOt    = empResults.reduce((s, r) => s + r.ot,      0);
+  const totEarly = empResults.reduce((s, r) => s + r.early,   0);
+  const totAll   = empResults.reduce((s, r) => s + r.totalOt, 0);
+  const totDays  = empResults.reduce((s, r) => s + r.days,    0);
+  const headCount = empResults.length;
+
+  document.getElementById('otTotalSummary').innerHTML = headCount === 0
+    ? '<div style="text-align:center;color:var(--text2);padding:1rem">この月のデータがありません</div>'
+    : `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.75rem;text-align:center">
+        ${[
+          ['対象人数',       headCount + '名'],
+          ['総出勤日数',     totDays + '日'],
+          ['早出残業 合計',  totEarly.toFixed(1) + 'h', totEarly > 0 ? 'var(--accent2)' : ''],
+          ['夕刻残業 合計',  totOt.toFixed(1)   + 'h', totOt   > 0 ? 'var(--warn)'    : ''],
+          ['残業 総合計',    totAll.toFixed(1)  + 'h', totAll  > 0 ? 'var(--danger)'  : ''],
+        ].map(([label, val, col]) => `
+          <div style="background:var(--surface2);border-radius:8px;padding:.75rem .5rem">
+            <div style="font-size:11px;color:var(--text2);margin-bottom:.25rem">${label}</div>
+            <div style="font-size:20px;font-weight:700;font-family:var(--mono);color:${col||'var(--text)'}">
+              ${val}
+            </div>
+          </div>`).join('')}
+      </div>`;
+
+  // ---- 部署別テーブル ----
+  if (!deptResults.length) {
+    document.getElementById('otDeptTable').innerHTML =
+      '<div style="text-align:center;color:var(--text2);padding:1.5rem">データがありません</div>';
+  } else {
+    let html = `<table class="master-table">
+      <thead><tr>
+        <th>部署</th><th>人数</th><th>出勤日数</th>
+        <th>早出残業(h)</th><th>夕刻残業(h)</th>
+        <th style="color:var(--danger)">残業合計(h)</th>
+      </tr></thead><tbody>`;
+    deptResults.forEach(d => {
+      const pct = totAll > 0 ? Math.round(d.totalOt / totAll * 100) : 0;
+      html += `<tr>
+        <td style="font-weight:500">${d.dept}</td>
+        <td style="text-align:center">${d.headCount}名</td>
+        <td style="text-align:center;font-family:var(--mono)">${d.days}日</td>
+        <td style="text-align:right;font-family:var(--mono);color:var(--accent2)">${d.early.toFixed(1)}</td>
+        <td style="text-align:right;font-family:var(--mono);color:var(--warn)">${d.ot.toFixed(1)}</td>
+        <td style="text-align:right;font-family:var(--mono);font-weight:700;color:var(--danger)">
+          ${d.totalOt.toFixed(1)}
+          <span style="font-size:10px;color:var(--text2);font-weight:400;margin-left:4px">${pct}%</span>
+        </td>
+      </tr>`;
+    });
+    // 合計行
+    html += `<tr style="background:var(--surface2);font-weight:700">
+      <td>合計</td><td style="text-align:center">${headCount}名</td>
+      <td style="text-align:center;font-family:var(--mono)">${totDays}日</td>
+      <td style="text-align:right;font-family:var(--mono);color:var(--accent2)">${totEarly.toFixed(1)}</td>
+      <td style="text-align:right;font-family:var(--mono);color:var(--warn)">${totOt.toFixed(1)}</td>
+      <td style="text-align:right;font-family:var(--mono);color:var(--danger)">${totAll.toFixed(1)}</td>
+    </tr></tbody></table>`;
+    document.getElementById('otDeptTable').innerHTML = html;
+  }
+
+  // ---- 月次推移テーブル ----
+  const allMonths = Object.keys(state.monthData).sort();
+  const allDepts  = [...new Set(sortedEmps().map(e => e.dept || '（未設定）'))];
+  if (!allMonths.length) {
+    document.getElementById('otTrendTable').innerHTML =
+      '<div style="text-align:center;color:var(--text2);padding:1.5rem">データがありません</div>';
+  } else {
+    let html = `<table class="master-table" style="min-width:600px">
+      <thead><tr>
+        <th>年月</th>
+        ${allDepts.map(d => `<th style="text-align:right">${d}</th>`).join('')}
+        <th style="text-align:right;color:var(--danger)">合計(h)</th>
+      </tr></thead><tbody>`;
+    allMonths.forEach(m => {
+      const res = calcOvertimeForMonth(m);
+      if (!res.length) return;
+      const byDept = {};
+      groupByDept(res).forEach(d => { byDept[d.dept] = d.totalOt; });
+      const rowTotal = res.reduce((s, r) => s + r.totalOt, 0);
+      const isSelected = m === ym;
+      html += `<tr style="${isSelected ? 'background:#EEF4FB;font-weight:700' : ''}">
+        <td style="font-family:var(--mono);white-space:nowrap">${m.replace('-','年')}月${isSelected ? ' ◀' : ''}</td>
+        ${allDepts.map(d => {
+          const v = byDept[d] || 0;
+          return `<td style="text-align:right;font-family:var(--mono);color:${v > 0 ? 'var(--warn)' : 'var(--text2)'}">
+            ${v > 0 ? v.toFixed(1) : '—'}</td>`;
+        }).join('')}
+        <td style="text-align:right;font-family:var(--mono);font-weight:700;color:var(--danger)">
+          ${rowTotal.toFixed(1)}
+        </td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    document.getElementById('otTrendTable').innerHTML = html;
+  }
+
+  // ---- 個人別明細 ----
+  if (!empResults.length) {
+    document.getElementById('otPersonTable').innerHTML =
+      '<div style="text-align:center;color:var(--text2);padding:1.5rem">データがありません</div>';
+  } else {
+    let html = `<table class="master-table">
+      <thead><tr>
+        <th>社員番号</th><th>氏名</th><th>部署</th><th>雇用区分</th>
+        <th>出勤日数</th><th>早出残業(h)</th><th>夕刻残業(h)</th>
+        <th style="color:var(--danger)">残業合計(h)</th>
+      </tr></thead><tbody>`;
+    const typeMap = { fulltime:'正社員', contract:'契約社員', part:'パート' };
+    empResults.forEach(r => {
+      const isBig = r.totalOt > 20;
+      html += `<tr style="${isBig ? 'background:var(--warn-bg)' : ''}">
+        <td style="font-family:var(--mono);color:var(--text2)">${r.emp.empNo||'—'}</td>
+        <td style="font-weight:500">${r.emp.name}</td>
+        <td>${r.dept}</td>
+        <td><span class="badge ${r.emp.empType==='part'?'badge-info':r.emp.empType==='contract'?'badge-warn':'badge-gray'}">
+          ${typeMap[r.emp.empType||'fulltime']}</span></td>
+        <td style="text-align:center;font-family:var(--mono)">${r.days}</td>
+        <td style="text-align:right;font-family:var(--mono);color:var(--accent2)">${r.early.toFixed(1)}</td>
+        <td style="text-align:right;font-family:var(--mono);color:var(--warn)">${r.ot.toFixed(1)}</td>
+        <td style="text-align:right;font-family:var(--mono);font-weight:700;color:${r.totalOt>0?'var(--danger)':'var(--text2)'}">
+          ${r.totalOt.toFixed(1)}${isBig ? ' ⚠' : ''}
+        </td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    document.getElementById('otPersonTable').innerHTML = html;
+  }
+}
+
+function exportOvertimeExcel() {
+  const ym = document.getElementById('otMonth').value || currentMonth;
+  const empResults = calcOvertimeForMonth(ym);
+  const deptResults = groupByDept(empResults);
+  const allMonths = Object.keys(state.monthData).sort();
+  const allDepts  = [...new Set(sortedEmps().map(e => e.dept || '（未設定）'))];
+  const wb = XLSX.utils.book_new();
+
+  // シート①：部署別当月
+  const deptData = [
+    [`残業分析 ${ym.replace('-','年')}月`], [],
+    ['部署','人数','出勤日数','早出残業(h)','夕刻残業(h)','残業合計(h)']
+  ];
+  deptResults.forEach(d => deptData.push([d.dept, d.headCount, d.days,
+    d.early, d.ot, d.totalOt]));
+  const totAll = deptResults.reduce((s,d) => s + d.totalOt, 0);
+  deptData.push(['合計', empResults.length,
+    empResults.reduce((s,r)=>s+r.days,0),
+    parseFloat(empResults.reduce((s,r)=>s+r.early,0).toFixed(2)),
+    parseFloat(empResults.reduce((s,r)=>s+r.ot,0).toFixed(2)),
+    parseFloat(totAll.toFixed(2))]);
+  const ws1 = XLSX.utils.aoa_to_sheet(deptData);
+  ws1['!cols'] = [{wch:14},{wch:6},{wch:10},{wch:12},{wch:12},{wch:12}];
+  XLSX.utils.book_append_sheet(wb, ws1, '部署別当月');
+
+  // シート②：月次推移
+  const trendData = [['年月', ...allDepts, '合計(h)']];
+  allMonths.forEach(m => {
+    const res = calcOvertimeForMonth(m);
+    if (!res.length) return;
+    const byDept = {};
+    groupByDept(res).forEach(d => { byDept[d.dept] = d.totalOt; });
+    const total = parseFloat(res.reduce((s,r)=>s+r.totalOt,0).toFixed(2));
+    trendData.push([m, ...allDepts.map(d => byDept[d] || 0), total]);
+  });
+  const ws2 = XLSX.utils.aoa_to_sheet(trendData);
+  ws2['!cols'] = [{wch:10}, ...allDepts.map(()=>({wch:12})), {wch:10}];
+  XLSX.utils.book_append_sheet(wb, ws2, '月次推移');
+
+  // シート③：個人別明細
+  const typeMap = { fulltime:'正社員', contract:'契約社員', part:'パート' };
+  const personData = [['社員番号','氏名','部署','雇用区分','出勤日数','早出残業(h)','夕刻残業(h)','残業合計(h)']];
+  empResults.forEach(r => personData.push([
+    r.emp.empNo||'', r.emp.name, r.dept,
+    typeMap[r.emp.empType||'fulltime'],
+    r.days, r.early, r.ot, r.totalOt
+  ]));
+  const ws3 = XLSX.utils.aoa_to_sheet(personData);
+  ws3['!cols'] = [{wch:10},{wch:14},{wch:12},{wch:10},{wch:10},{wch:12},{wch:12},{wch:12}];
+  XLSX.utils.book_append_sheet(wb, ws3, '個人別明細');
+
+  XLSX.writeFile(wb, `残業分析_${ym}.xlsx`);
+  toast('残業分析Excelを保存しました');
 }
 
 // ===== MONTHLY CHECK =====
@@ -1793,7 +2856,7 @@ function renderCheck() {
   const prevYm = getPrevMonth(ym);
   const container = document.getElementById('checkBody');
 
-  const withData = state.empMasters.filter(e =>
+  const withData = sortedEmps().filter(e =>
     ((state.monthData[ym] || {})[e.id] || []).length > 0 ||
     ((state.monthData[prevYm] || {})[e.id] || []).length > 0
   );
@@ -1904,7 +2967,7 @@ function renderCheck() {
 function downloadCheckExcel() {
   const ym = document.getElementById('checkMonth').value || currentMonth;
   const prevYm = getPrevMonth(ym);
-  const withData = state.empMasters.filter(e =>
+  const withData = sortedEmps().filter(e =>
     ((state.monthData[ym] || {})[e.id] || []).length > 0 ||
     ((state.monthData[prevYm] || {})[e.id] || []).length > 0
   );
@@ -1974,18 +3037,19 @@ function renderCalendar() {
     return monthData[String(empId)] || monthData[empId] || [];
   }
 
-  // データがある従業員を優先して初期選択
+  // データがある従業員を優先して初期選択（社員番号順）
   if(!calEmpId) {
-    const firstWithData = state.empMasters.find(e => getEmpRows(e.id).length > 0);
+    const sorted = sortedEmps();
+    const firstWithData = sorted.find(e => getEmpRows(e.id).length > 0);
     if(firstWithData) calEmpId = String(firstWithData.id);
-    else if(state.empMasters.length > 0) calEmpId = String(state.empMasters[0].id);
+    else if(sorted.length > 0) calEmpId = String(sorted[0].id);
   }
 
-  state.empMasters.forEach(emp => {
+  sortedEmps().forEach(emp => {
     const hasData = getEmpRows(emp.id).length > 0;
     const btn = document.createElement('button');
     btn.className = `emp-tab${String(emp.id)===String(calEmpId)?' active':''}${hasData?' has-data':''}`;
-    btn.innerHTML = `<span class="dot"></span>${emp.name}`;
+    btn.innerHTML = `<span class="dot"></span>${emp.empNo?'<span style="font-size:10px;opacity:.6;margin-right:2px">'+emp.empNo+'</span>':''}${emp.name}`;
     btn.onclick = () => { calEmpId = String(emp.id); renderCalendar(); };
     tabContainer.appendChild(btn);
   });
@@ -2003,7 +3067,7 @@ function renderCalendar() {
   // 有休取得日（当月・翌月含む全期間）
   const vacDates = new Set(
     (state.vacation.uses || [])
-      .filter(u => u.empId === calEmpId)
+      .filter(u => String(u.empId) === String(calEmpId))
       .map(u => u.date)
   );
 
@@ -2136,7 +3200,7 @@ function renderVacationAlertBanner() {
   const banner = document.getElementById('vacAlertBanner');
   if(!banner) return;
   const alerts = [];
-  state.empMasters.forEach(emp => {
+  sortedEmps().forEach(emp => {
     const m = getVacMaster(emp.id);
     if(!m.nextDate) return;
     const daysUntil = Math.floor((new Date(m.nextDate) - now) / 86400000);
@@ -2165,7 +3229,7 @@ function renderVacation() {
   // 直接編集テーブル
   const tbody = document.getElementById('vacDirectBody');
   tbody.innerHTML = '';
-  state.empMasters.forEach(emp => {
+  sortedEmps().forEach(emp => {
     const m = getVacMaster(emp.id);
     const used = (state.vacation.uses || [])
       .filter(u => String(u.empId) === String(emp.id))
@@ -2287,9 +3351,9 @@ function populateVacEmpSelect(selId) {
   const sel = document.getElementById(selId);
   if(!sel) return;
   sel.innerHTML = '';
-  state.empMasters.forEach(e => {
+  sortedEmps().forEach(e => {
     const opt = document.createElement('option');
-    opt.value = e.id; opt.textContent = e.name;
+    opt.value = e.id; opt.textContent = (e.empNo ? e.empNo + ' ' : '') + e.name;
     sel.appendChild(opt);
   });
 }
