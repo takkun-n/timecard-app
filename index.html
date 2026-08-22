@@ -197,6 +197,21 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
   main{padding:1rem .75rem 3rem}
   .nav-tab{padding:.6rem .75rem;font-size:12px}
 }
+
+/* ===== 月次ステータスバー ===== */
+.month-status-bar{background:#EEF4FB;border-bottom:1px solid #B5D4F4;padding:.5rem 1.5rem;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.month-status-bar .ms-label{font-size:11px;font-weight:700;color:#0C447C;letter-spacing:.05em;text-transform:uppercase}
+.month-status-bar .ms-current{font-size:14px;font-weight:700;color:#0C447C;display:flex;align-items:center;gap:6px}
+.month-status-bar .ms-range{font-size:11px;color:#4A7AAA;background:#D6EAF8;border-radius:10px;padding:2px 8px}
+.month-status-bar .ms-spacer{flex:1}
+.month-status-bar .ms-hint{font-size:11px;color:#4A7AAA}
+.btn-complete{background:#2D6A3F;color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:12px;font-weight:700;font-family:'Noto Sans JP',sans-serif;cursor:pointer;display:flex;align-items:center;gap:5px;transition:background .15s}
+.btn-complete:hover{background:#235530}
+
+/* ロック済み月チップ */
+.month-chip.global-lock{background:#E8F5EC;border-color:#9FE1CB;color:#2D6A3F;cursor:default}
+.month-chip.global-lock:hover{background:#E8F5EC}
+.month-chip.global-lock.active{background:#2D6A3F;color:#fff;border-color:#2D6A3F}
 </style>
 </head>
 <body>
@@ -247,6 +262,18 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
   <div class="nav-tab" onclick="showPage('dept')">🏢 部署マスター</div>
   <div class="nav-tab" onclick="showPage('overtime')">📊 残業分析</div>
   <div class="nav-tab" onclick="showPage('settings')">⚙️ 勤務設定</div>
+</div>
+
+<!-- 月次ステータスバー -->
+<div class="month-status-bar" id="monthStatusBar">
+  <span class="ms-label">取込処理月</span>
+  <span class="ms-current" id="msCurrentMonth">
+    <span id="msMonthLabel">読込中...</span>
+    <span class="ms-range" id="msMonthRange"></span>
+  </span>
+  <span class="ms-hint" id="msHint"></span>
+  <span class="ms-spacer"></span>
+  <button class="btn-complete" onclick="showMonthCompleteDialog()">✅ 今月完了・次月へ進む</button>
 </div>
 
 <main>
@@ -403,9 +430,11 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
     <div class="card-body">
       <div class="summary-grid">
         <div class="s-card"><div class="s-label">出勤日数</div><div class="s-value" id="s-days">—</div></div>
+        <div class="s-card" style="background:var(--surface2)"><div class="s-label">休日出勤日数</div><div class="s-value" id="s-holiday-days">—</div></div>
         <div class="s-card"><div class="s-label">総実働(h)</div><div class="s-value" id="s-total">—</div></div>
         <div class="s-card"><div class="s-label">早出残業</div><div class="s-value" id="s-early">—</div></div>
         <div class="s-card"><div class="s-label">夕刻残業</div><div class="s-value" id="s-ot">—</div></div>
+        <div class="s-card" style="background:var(--surface2)"><div class="s-label">休日残業</div><div class="s-value" id="s-holiday-ot">—</div></div>
         <div class="s-card"><div class="s-label">遅刻早退</div><div class="s-value" id="s-late">—</div></div>
         <div class="s-card"><div class="s-label">要確認</div><div class="s-value" id="s-issues">—</div></div>
       </div>
@@ -637,6 +666,26 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
     </div>
   </div>
 
+  <!-- 個人別残業グラフ -->
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">📊 個人別残業グラフ（残業合計・多い順）</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:12px;color:var(--text2)">表示：</span>
+        <select id="otChartFilter" onchange="renderOvertimeChart()" style="border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:13px;font-family:'Noto Sans JP',sans-serif">
+          <option value="top20">上位20名</option>
+          <option value="top10">上位10名</option>
+          <option value="over20">20時間以上</option>
+          <option value="over30">30時間以上</option>
+          <option value="all">全員</option>
+        </select>
+      </div>
+    </div>
+    <div class="card-body" id="otChartBody">
+      <div style="text-align:center;color:var(--text2);padding:1rem">月を選択してください</div>
+    </div>
+  </div>
+
   <!-- 個人別明細 -->
   <div class="card">
     <div class="card-head"><div class="card-title">👤 当月 個人別残業明細</div></div>
@@ -722,6 +771,12 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
             <input type="password" id="uPw" placeholder="••••••••" autocomplete="new-password">
           </div>
         </div>
+        <div class="form-item" style="margin-bottom:.75rem">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="uIsAdmin" style="width:auto">
+            管理者権限を付与する（Claude API設定など機密項目を表示）
+          </label>
+        </div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-accent btn-sm" onclick="saveUser()">保存</button>
           <button class="btn btn-sm" onclick="document.getElementById('userForm').style.display='none'">キャンセル</button>
@@ -731,12 +786,12 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
     </div>
   </div>
 
-  <!-- Claude API設定 -->
-  <div class="card">
+  <!-- Claude API設定（管理者のみ表示） -->
+  <div class="card" id="claudeApiCard" style="display:none">
     <div class="card-head"><div class="card-title">🤖 Claude API設定（スキャン自動読取）</div></div>
     <div class="card-body">
       <p style="font-size:13px;color:var(--text2);margin-bottom:.75rem">
-        タイムカードのPDFをAIが自動で読み取ります。APIキーはこの端末のみに保存されます。<br>
+        タイムカードのPDFをAIが自動で読み取ります。APIキーはこの端末のブラウザにのみ保存され、クラウドには送信されません。<br>
         取得先：<strong>console.anthropic.com</strong> → API Keys
       </p>
       <div class="form-grid" style="grid-template-columns:1fr auto;gap:.5rem;margin-bottom:.5rem">
@@ -812,29 +867,61 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
 
 <!-- Excel出力オプションモーダル -->
 <div class="modal-bg" id="xlsxOptionModal">
-  <div class="modal" style="max-width:420px">
+  <div class="modal" style="max-width:480px">
     <h3>⬇ Excel出力オプション</h3>
     <div style="margin-bottom:1rem">
+
       <div class="form-item" style="margin-bottom:.75rem">
-        <label>部署で絞り込み</label>
-        <select id="xlsDeptFilter" onchange="updateXlsPreview()" style="width:100%;border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;font-family:'Noto Sans JP',sans-serif">
-          <option value="">全部署</option>
+        <label>対象期間（年月〜年月）</label>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="month" id="xlsYmFrom" onchange="onXlsRangeChange()" style="flex:1;border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px">
+          <span style="font-size:13px;color:var(--text2)">〜</span>
+          <input type="month" id="xlsYmTo" onchange="onXlsRangeChange()" style="flex:1;border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px">
+        </div>
+        <div style="font-size:11px;color:var(--text2);margin-top:4px">※ 同じ年月を指定すると1ヶ月分のみ出力します</div>
+      </div>
+
+      <div class="form-item" style="margin-bottom:.75rem">
+        <label>データ出力対象</label>
+        <select id="xlsTargetEmp" onchange="onXlsTargetChange()" style="width:100%;border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;font-family:'Noto Sans JP',sans-serif">
+          <option value="">全員</option>
         </select>
       </div>
+
       <div class="form-item" style="margin-bottom:.75rem">
-        <label>雇用区分で絞り込み</label>
-        <div style="display:flex;gap:12px;padding:6px 0;flex-wrap:wrap">
-          <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
-            <input type="checkbox" id="xlsChkFulltime" checked onchange="updateXlsPreview()"> 正社員
-          </label>
-          <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
-            <input type="checkbox" id="xlsChkContract" checked onchange="updateXlsPreview()"> 契約社員
-          </label>
-          <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
-            <input type="checkbox" id="xlsChkPart" checked onchange="updateXlsPreview()"> パート
-          </label>
+        <label>出力するシート</label>
+        <select id="xlsSheetType" onchange="updateXlsPreview()" style="width:100%;border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;font-family:'Noto Sans JP',sans-serif">
+          <option value="all">すべて出力</option>
+          <option value="summary">① 全員サマリー</option>
+          <option value="payroll">② 給与入力用</option>
+          <option value="personal">③ 個人勤怠データ</option>
+          <option value="attendance">④ 個人出勤簿</option>
+        </select>
+      </div>
+
+      <div id="xlsFilterGroup">
+        <div class="form-item" style="margin-bottom:.75rem">
+          <label>部署で絞り込み</label>
+          <select id="xlsDeptFilter" onchange="updateXlsPreview()" style="width:100%;border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;font-family:'Noto Sans JP',sans-serif">
+            <option value="">全部署</option>
+          </select>
+        </div>
+        <div class="form-item" style="margin-bottom:.75rem">
+          <label>雇用区分で絞り込み</label>
+          <div style="display:flex;gap:12px;padding:6px 0;flex-wrap:wrap">
+            <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
+              <input type="checkbox" id="xlsChkFulltime" checked onchange="updateXlsPreview()"> 正社員
+            </label>
+            <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
+              <input type="checkbox" id="xlsChkContract" checked onchange="updateXlsPreview()"> 契約社員
+            </label>
+            <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
+              <input type="checkbox" id="xlsChkPart" checked onchange="updateXlsPreview()"> パート
+            </label>
+          </div>
         </div>
       </div>
+
       <div style="background:var(--surface2);border-radius:7px;padding:.6rem 1rem;font-size:13px;color:var(--text2)" id="xlsPreview">
         対象：— 名
       </div>
@@ -880,6 +967,39 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
   </div>
 </div>
 
+<!-- 今月完了モーダル -->
+<div class="modal-bg" id="monthCompleteModal">
+  <div class="modal" style="max-width:460px">
+    <h3>✅ 今月分を完了する</h3>
+    <div id="mcModalBody" style="margin-bottom:1.25rem;font-size:13px;line-height:2;color:var(--text2)">
+      読み込み中...
+    </div>
+    <div style="background:var(--warn-bg);border:1px solid #EF9F27;border-radius:8px;padding:.65rem 1rem;margin-bottom:1.25rem;font-size:12px;color:var(--warn)">
+      ⚠️ 完了後はGASの処理月が次月に切り替わります。<br>
+      追加取込が必要な場合は、完了前に行ってください。<br>
+      完了済み月のデータは引き続き閲覧・編集できます。
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn" onclick="document.getElementById('monthCompleteModal').classList.remove('show')">キャンセル</button>
+      <button class="btn btn-success" onclick="completeCurrentMonth()">✅ 完了して次月へ進む</button>
+    </div>
+  </div>
+</div>
+
+<!-- ログアウト確認モーダル -->
+<div class="modal-bg" id="logoutModal">
+  <div class="modal" style="max-width:420px">
+    <h3>ログアウト確認</h3>
+    <div id="logoutModalBody" style="margin-bottom:1.25rem;font-size:13px;line-height:2;color:var(--text2)">
+      読み込み中...
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn" onclick="document.getElementById('logoutModal').classList.remove('show')">戻る</button>
+      <button class="btn btn-accent" onclick="executeLogout()">ログアウト</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -908,8 +1028,9 @@ function saveUsersToLS(users) {
   localStorage.setItem(USERS_KEY, JSON.stringify(users));
   db.collection('timecard').doc('users').set({ users }).catch(e => console.error('Firestore users:', e));
 }
-let USERS = getUsers() || [{id:'admin', pw:'miedc2024', name:'管理者'}];
-if (!getUsers()) saveUsersToLS(USERS);
+let USERS = getUsers() || [{id:'admin', pw:'miedc2024', name:'管理者', isAdmin:true}];
+let currentUser = null;
+// ★ Firestoreが最権威: 起動時はFirestoreから読み込んでから使う（ここでは上書きしない）
 
 // ===== STATE =====
 let state = {
@@ -949,11 +1070,127 @@ function saveState() {
 }
 
 function loadState() {
-  // localStorageから読み込み（Firestoreが使えない場合のフォールバック）
   try {
     const saved = localStorage.getItem(LS_KEY);
     if(saved) { state = {...state, ...JSON.parse(saved)}; }
   } catch(e) { console.warn('State load failed', e); }
+}
+
+// ===== 月次設定（appConfig） =====
+let appConfig = {
+  currentMonth: null,   // 現在の処理月（GASもここを見る）
+  lockedMonths: [],     // 完了済み月の一覧
+};
+
+async function loadConfig() {
+  try {
+    const snap = await db.collection('timecard').doc('config').get();
+    if (snap.exists) {
+      appConfig = {...appConfig, ...snap.data()};
+    } else {
+      // 初回：現在月をデフォルトで設定
+      const d = new Date();
+      appConfig.currentMonth = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+      await saveConfig();
+    }
+  } catch(e) { console.warn('Config load failed:', e); }
+}
+
+async function saveConfig() {
+  try {
+    await db.collection('timecard').doc('config').set(appConfig);
+  } catch(e) { console.error('Config save failed:', e); }
+}
+
+function getMonthRange(ym) {
+  if (!ym) return '';
+  const closing = parseInt(state.cfg.closingDay) || 20;
+  const [cy, cm] = ym.split('-').map(Number);
+  if (closing === 31) {
+    const lastDay = new Date(cy, cm, 0).getDate();
+    return cy + '/' + cm + '/1〜' + cy + '/' + cm + '/' + lastDay;
+  }
+  const startDay = closing + 1;
+  const prevM = cm === 1 ? 12 : cm - 1;
+  const prevY = cm === 1 ? cy - 1 : cy;
+  return prevY + '/' + prevM + '/' + startDay + '〜' + cy + '/' + cm + '/' + closing;
+}
+
+function updateMonthStatusBar() {
+  const ym = appConfig.currentMonth;
+  if (!ym) return;
+  const [cy, cm] = ym.split('-').map(Number);
+  document.getElementById('msMonthLabel').textContent = cy + '年' + cm + '月分';
+  document.getElementById('msMonthRange').textContent = getMonthRange(ym);
+
+  // 今月データの取込件数
+  const md = state.monthData || {};
+  let totalRecs = 0;
+  // 処理月に関わる月（前月と当月）
+  const prevM  = cm === 1 ? 12 : cm - 1;
+  const prevY  = cm === 1 ? cy - 1 : cy;
+  const prevYM = prevY + '-' + String(prevM).padStart(2, '0');
+  [prevYM, ym].forEach(yymm => {
+    if (md[yymm]) Object.values(md[yymm]).forEach(rows => totalRecs += (rows||[]).length);
+  });
+  // ユニーク社員数
+  const empSet = new Set();
+  [prevYM, ym].forEach(yymm => {
+    if (md[yymm]) Object.keys(md[yymm]).forEach(k => { if ((md[yymm][k]||[]).length > 0) empSet.add(k); });
+  });
+  const hint = empSet.size > 0
+    ? '取込済: ' + empSet.size + '名 / ' + totalRecs + '件'
+    : '未取込（スキャンPDFを未処理フォルダに入れると自動取込されます）';
+  document.getElementById('msHint').textContent = hint;
+}
+
+function showMonthCompleteDialog() {
+  const ym = appConfig.currentMonth;
+  if (!ym) { alert('処理月が設定されていません'); return; }
+  const [cy, cm] = ym.split('-').map(Number);
+  const nextM = cm === 12 ? 1 : cm + 1;
+  const nextY = cm === 12 ? cy + 1 : cy;
+  const nextYM = nextY + '-' + String(nextM).padStart(2,'0');
+
+  // 取込済み人数カウント
+  const md = state.monthData || {};
+  const prevM  = cm === 1 ? 12 : cm - 1;
+  const prevY  = cm === 1 ? cy - 1 : cy;
+  const prevYM = prevY + '-' + String(prevM).padStart(2, '0');
+  const empSet = new Set();
+  [prevYM, ym].forEach(yymm => {
+    if (md[yymm]) Object.keys(md[yymm]).forEach(k => { if ((md[yymm][k]||[]).length > 0) empSet.add(k); });
+  });
+
+  const body = `<strong style="color:var(--text);font-size:14px">対象月：${cy}年${cm}月分</strong><br>
+期間：${getMonthRange(ym)}<br>
+取込済：<strong style="color:var(--accent)">${empSet.size}名</strong>（全${state.empMasters.length}名中）<br><br>
+✅ 完了すると……<br>
+・次回の<strong>処理月が「${nextY}年${nextM}月分」</strong>に切り替わります<br>
+・GASも自動で次月のタイムカードを処理します<br>
+・今月のデータはそのまま閲覧・編集できます`;
+
+  document.getElementById('mcModalBody').innerHTML = body;
+  document.getElementById('monthCompleteModal').classList.add('show');
+}
+
+async function completeCurrentMonth() {
+  const ym = appConfig.currentMonth;
+  if (!ym) return;
+  const [cy, cm] = ym.split('-').map(Number);
+  const nextM = cm === 12 ? 1 : cm + 1;
+  const nextY = cm === 12 ? cy + 1 : cy;
+  const nextYM = nextY + '-' + String(nextM).padStart(2,'0');
+
+  if (!appConfig.lockedMonths) appConfig.lockedMonths = [];
+  if (!appConfig.lockedMonths.includes(ym)) appConfig.lockedMonths.push(ym);
+  appConfig.currentMonth = nextYM;
+
+  await saveConfig();
+  document.getElementById('monthCompleteModal').classList.remove('show');
+  updateMonthStatusBar();
+  renderRecentMonths();
+  toast(`✅ ${cy}年${cm}月分を完了しました。次の処理月：${nextY}年${nextM}月分`);
 }
 
 async function loadStateFromFirestore() {
@@ -972,11 +1209,13 @@ async function loadStateFromFirestore() {
 async function loadUsersFromFirestore() {
   try {
     const snap = await db.collection('timecard').doc('users').get();
-    if (snap.exists && snap.data().users) {
+    if (snap.exists && snap.data().users && snap.data().users.length > 0) {
       USERS = snap.data().users;
       localStorage.setItem(USERS_KEY, JSON.stringify(USERS));
+      return true;
     }
   } catch(e) { console.warn('Firestore users load failed:', e); }
+  return false;
 }
 
 // 社員番号順にソートした従業員一覧を返す
@@ -1005,15 +1244,32 @@ function showSaveIndicator() {
 
 // ===== INIT =====
 (async function() {
-  // Firestoreからデータ読込（失敗時はlocalStorageフォールバック）
   const fromCloud = await loadStateFromFirestore();
   if (!fromCloud) loadState();
-  await loadUsersFromFirestore();
+  // ★ セキュリティ：過去に誤ってFirestoreへ保存されたClaude APIキーを検知・除去
+  if (state.cfg && state.cfg.claudeApiKey) {
+    console.warn('⚠ Firestoreに保存されていたAPIキーを削除します（セキュリティ対応）');
+    delete state.cfg.claudeApiKey;
+    saveState();
+  }
+  const usersFromCloud = await loadUsersFromFirestore();
+  if (!usersFromCloud) {
+    // FirestoreにUSERSがない場合のみ、現在値（localStorage or デフォルト）を保存
+    saveUsersToLS(USERS);
+  }
+  // ★ 既存ユーザーにisAdmin未設定の場合の救済：管理者が誰もいなければadminユーザーに権限付与
+  if (!USERS.some(u => u.isAdmin)) {
+    const fallback = USERS.find(u => u.id === 'admin') || USERS[0];
+    if (fallback) {
+      fallback.isAdmin = true;
+      saveUsersToLS(USERS);
+    }
+  }
+  await loadConfig();
 
   currentMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
   document.getElementById('yearMonth').value = currentMonth;
 
-  // ローディング非表示→ログイン画面表示
   document.getElementById('loadingScreen').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'flex';
 })();
@@ -1027,20 +1283,63 @@ function doLogin() {
   const user = USERS.find(u => (u.id===id || u.name===id) && u.pw===pw);
   if(!user) { errEl.classList.add('show'); return; }
   errEl.classList.remove('show');
+  currentUser = user;
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('appScreen').style.display = 'block';
   document.getElementById('userLabel').textContent = user.name;
   document.getElementById('userAvatar').textContent = user.name[0];
+  const apiCard = document.getElementById('claudeApiCard');
+  if (apiCard) apiCard.style.display = user.isAdmin ? '' : 'none';
   initApp();
 }
 
 function doLogout() {
-  if(!confirm('ログアウトしますか？')) return;
+  const ym = appConfig.currentMonth;
+  let bodyHtml = '';
+  if (ym) {
+    const [cy, cm] = ym.split('-').map(Number);
+    const prevM  = cm === 1 ? 12 : cm - 1;
+    const prevY  = cm === 1 ? cy - 1 : cy;
+    const prevYM = prevY + '-' + String(prevM).padStart(2, '0');
+    const md = state.monthData || {};
+    const empSet = new Set();
+    [prevYM, ym].forEach(yymm => {
+      if (md[yymm]) Object.keys(md[yymm]).forEach(k => { if ((md[yymm][k]||[]).length > 0) empSet.add(k); });
+    });
+    const isLocked = (appConfig.lockedMonths || []).includes(ym);
+    const nextM = cm === 12 ? 1 : cm + 1;
+    const nextY = cm === 12 ? cy + 1 : cy;
+
+    bodyHtml = `<div style="background:var(--surface2);border-radius:8px;padding:.85rem 1rem;margin-bottom:1rem;font-size:13px;line-height:2.2">
+      <div><span style="color:var(--text2)">現在の処理月：</span><strong>${cy}年${cm}月分</strong>　<span style="font-size:11px;color:var(--text2)">${getMonthRange(ym)}</span></div>
+      <div><span style="color:var(--text2)">取込済：</span><strong style="color:var(--accent)">${empSet.size}名 / 全${state.empMasters.length}名</strong></div>
+      ${isLocked
+        ? `<div style="color:var(--success)">✅ 今月は完了済みです</div>`
+        : `<div style="color:var(--warn)">📌 今月はまだ完了していません</div>`}
+    </div>
+    <div style="font-size:13px;color:var(--text2);line-height:2">
+      ${isLocked
+        ? `次回ログイン時：<strong>${nextY}年${nextM}月分</strong>のタイムカード取込から開始します`
+        : `次回ログイン時：<strong>${cy}年${cm}月分</strong>の取込・確認の続きから開始します<br>
+           <span style="font-size:11px">（追加取込がある場合は「更新」として処理されます）</span>`}
+    </div>`;
+  } else {
+    bodyHtml = '<p style="color:var(--text2);font-size:13px">ログアウトしますか？</p>';
+  }
+  document.getElementById('logoutModalBody').innerHTML = bodyHtml;
+  document.getElementById('logoutModal').classList.add('show');
+}
+
+function executeLogout() {
+  currentUser = null;
+  document.getElementById('logoutModal').classList.remove('show');
   document.getElementById('loginScreen').style.display = 'flex';
   document.getElementById('appScreen').style.display = 'none';
   document.getElementById('loginId').value = '';
   document.getElementById('loginPw').value = '';
   document.getElementById('loginErr').classList.remove('show');
+  const apiCard = document.getElementById('claudeApiCard');
+  if (apiCard) apiCard.style.display = 'none';
 }
 
 // ===== ユーザー管理 =====
@@ -1054,12 +1353,14 @@ function renderUsers() {
     <thead><tr style="background:var(--surface2);text-align:left">
       <th style="padding:7px 10px;border:1px solid var(--border);width:140px">ユーザーID</th>
       <th style="padding:7px 10px;border:1px solid var(--border)">氏名</th>
+      <th style="padding:7px 10px;border:1px solid var(--border);width:90px;text-align:center">権限</th>
       <th style="padding:7px 10px;border:1px solid var(--border);width:140px;text-align:center">操作</th>
     </tr></thead><tbody>`;
   USERS.forEach((u, i) => {
     html += `<tr>
       <td style="padding:7px 10px;border:1px solid var(--border);font-family:var(--mono)">${u.id}</td>
       <td style="padding:7px 10px;border:1px solid var(--border)">${u.name}</td>
+      <td style="padding:7px 10px;border:1px solid var(--border);text-align:center">${u.isAdmin ? '<span class="badge badge-ok">管理者</span>' : '<span style="color:var(--text2);font-size:12px">一般</span>'}</td>
       <td style="padding:7px 10px;border:1px solid var(--border);text-align:center">
         <button class="btn btn-sm" onclick="showUserForm(${i})">編集</button>
         ${USERS.length > 1 ? `<button class="btn btn-sm btn-danger" style="margin-left:4px" onclick="deleteUser(${i})">削除</button>` : ''}
@@ -1082,6 +1383,7 @@ function showUserForm(idx) {
     document.getElementById('uPw').value = '';
     document.getElementById('uPwRequired').style.display = '';
     document.getElementById('uPwOptional').style.display = 'none';
+    document.getElementById('uIsAdmin').checked = false;
   } else {
     // 編集
     const u = USERS[idx];
@@ -1091,15 +1393,17 @@ function showUserForm(idx) {
     document.getElementById('uPw').value = '';
     document.getElementById('uPwRequired').style.display = 'none';
     document.getElementById('uPwOptional').style.display = '';
+    document.getElementById('uIsAdmin').checked = !!u.isAdmin;
   }
   document.getElementById('uName').focus();
   document.getElementById('userForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function saveUser() {
-  const id   = document.getElementById('uId').value.trim();
-  const name = document.getElementById('uName').value.trim();
-  const pw   = document.getElementById('uPw').value;
+  const id      = document.getElementById('uId').value.trim();
+  const name    = document.getElementById('uName').value.trim();
+  const pw      = document.getElementById('uPw').value;
+  const isAdmin = document.getElementById('uIsAdmin').checked;
 
   if (!name) { alert('氏名を入力してください'); return; }
 
@@ -1108,11 +1412,18 @@ function saveUser() {
     if (!id) { alert('ユーザーIDを入力してください'); return; }
     if (!pw) { alert('パスワードを入力してください'); return; }
     if (USERS.some(u => u.id === id)) { alert('そのユーザーIDは既に使われています'); return; }
-    USERS.push({ id, name, pw });
+    USERS.push({ id, name, pw, isAdmin });
   } else {
     // 編集
     USERS[editUserIdx].name = name;
+    USERS[editUserIdx].isAdmin = isAdmin;
     if (pw) USERS[editUserIdx].pw = pw;
+    // 自分自身を編集した場合は表示も即時反映
+    if (currentUser && currentUser.id === USERS[editUserIdx].id) {
+      currentUser = USERS[editUserIdx];
+      const apiCard = document.getElementById('claudeApiCard');
+      if (apiCard) apiCard.style.display = currentUser.isAdmin ? '' : 'none';
+    }
   }
 
   saveUsersToLS(USERS);
@@ -1151,6 +1462,7 @@ function initApp() {
   updateGuide();
   renderVacationAlertBanner();
   updateApiKeyStatus();
+  updateMonthStatusBar();
 }
 
 function selectMonth(ym) {
@@ -1209,16 +1521,23 @@ function selectMonth(ym) {
 
 function renderRecentMonths() {
   const container = document.getElementById('recentMonths');
-  // Get all months that have data + current month
   const allMonths = new Set([currentMonth, ...Object.keys(state.monthData)]);
-  // Sort descending
+  if (appConfig.currentMonth) allMonths.add(appConfig.currentMonth);
   const sorted = [...allMonths].sort().reverse().slice(0,12);
+  const locked = appConfig.lockedMonths || [];
   container.innerHTML = '';
   sorted.forEach(ym => {
-    const hasData = state.monthData[ym] && Object.keys(state.monthData[ym]).length > 0;
+    const hasData   = state.monthData[ym] && Object.keys(state.monthData[ym]).length > 0;
+    const isLocked  = locked.includes(ym);
+    const isCurrent = ym === appConfig.currentMonth;
     const chip = document.createElement('div');
-    chip.className = `month-chip${ym===currentMonth?' active':''}${hasData?' has-data':''}`;
-    chip.textContent = ym.replace('-','年')+'月';
+    chip.className = `month-chip${ym===currentMonth?' active':''}${hasData?' has-data':''}${isLocked?' global-lock':''}`;
+    const [cy, cm] = ym.split('-').map(Number);
+    let label = cy + '年' + cm + '月';
+    if (isLocked)  label = '🔒 ' + label;
+    if (isCurrent) label = '▶ ' + label;
+    chip.textContent = label;
+    chip.title = isLocked ? '完了済み（閲覧のみ）' : isCurrent ? '現在の処理月' : '';
     chip.onclick = () => selectMonth(ym);
     container.appendChild(chip);
   });
@@ -1228,11 +1547,10 @@ function renderRecentMonths() {
 function renderEmpTabs() {
   const container = document.getElementById('empTabs');
   container.innerHTML = '';
-  const monthData = state.monthData[currentMonth] || {};
   const locks = state.locks || {};
   const lockKey = `${currentMonth}`;
   sortedEmps().forEach(emp => {
-    const hasData = (monthData[String(emp.id)] || monthData[emp.id] || []).length > 0;
+    const hasData = getCardRows(emp.id, currentMonth).length > 0;
     const isConfirmed = locks[lockKey] && (locks[lockKey][emp.id] || locks[lockKey][String(emp.id)]);
     const btn = document.createElement('button');
     btn.className = `emp-tab${String(emp.id)===String(currentEmpId)?' active':''}${hasData?' has-data':''}${isConfirmed?' confirmed':''}`;
@@ -1365,17 +1683,63 @@ function updateGuide() {
   }
 }
 
+// 締め日を考慮した月範囲を返す（例: 20日締め "2026-06" → prevYM="2026-05", ym="2026-06"）
+function getCardMonthRange(ym) {
+  const closing = parseInt(state.cfg.closingDay) || 20;
+  if (closing === 31) return { prevYM: null, ym, closing };
+  const [cy, cm] = ym.split('-').map(Number);
+  const prevM = cm === 1 ? 12 : cm - 1;
+  const prevY = cm === 1 ? cy - 1 : cy;
+  return { prevYM: prevY + '-' + String(prevM).padStart(2, '0'), ym, closing };
+}
+
+// 指定従業員・カード月の全行を返す（20日締め: 前月21日〜当月20日を合算）
+function getCardRows(empId, ym) {
+  const id = String(empId);
+  const { prevYM, closing } = getCardMonthRange(ym);
+  const currAll = (state.monthData[ym] || {})[id] || (state.monthData[ym] || {})[empId] || [];
+  if (!prevYM) return [...currAll].sort((a,b)=>a.date.localeCompare(b.date));
+  const prevAll = (state.monthData[prevYM] || {})[id] || (state.monthData[prevYM] || {})[empId] || [];
+  // 前月行: prevYMバケット＋currYMバケット両方から前月日付を拾う（旧GASはカード月バケットに保存）
+  const seenDates = new Set();
+  const prevRows = [...prevAll, ...currAll]
+    .filter(r => (r.date||'').slice(0,7) === prevYM && parseInt((r.date||'').slice(8)) > closing)
+    .filter(r => { if(seenDates.has(r.date)) return false; seenDates.add(r.date); return true; });
+  const currRows = currAll.filter(r => (r.date||'').slice(0,7) === ym && parseInt((r.date||'').slice(8)) <= closing);
+  return [...prevRows, ...currRows].sort((a,b)=>a.date.localeCompare(b.date));
+}
+
 function getRows() {
   if(!currentEmpId || !currentMonth) return [];
-  const md = state.monthData[currentMonth] || {};
-  return md[currentEmpId] || md[String(currentEmpId)] || [];
+  return getCardRows(currentEmpId, currentMonth);
 }
 
 function setRows(rows) {
   if(!currentEmpId || !currentMonth) return;
+  const { prevYM, closing } = getCardMonthRange(currentMonth);
+  const id = String(currentEmpId);
+  if (!prevYM) {
+    if(!state.monthData[currentMonth]) state.monthData[currentMonth] = {};
+    state.monthData[currentMonth][id] = rows;
+    return;
+  }
+  // カード表示行を月別に分割（前月締め日超 / それ以外）
+  const prevRows = rows.filter(r => r.date && r.date.slice(0,7) === prevYM);
+  const currRows = rows.filter(r => !r.date || r.date.slice(0,7) !== prevYM);
+
+  // 前月の「カード外」行（締め日以下の日付 = 別カードの裏面）を保持
+  // ★年月チェック必須: prevYMの行のみ保持（他月の混入データは除外）
+  if(!state.monthData[prevYM]) state.monthData[prevYM] = {};
+  const existingPrev = state.monthData[prevYM][id] || [];
+  const prevNonCard = existingPrev.filter(r => {
+    const d = parseInt((r.date||'').slice(8));
+    return r.date && r.date.slice(0,7) === prevYM && d > 0 && d <= closing;
+  });
+  state.monthData[prevYM][id] = [...prevNonCard, ...prevRows]
+    .sort((a,b) => (a.date||'').localeCompare(b.date||''));
+
   if(!state.monthData[currentMonth]) state.monthData[currentMonth] = {};
-  // 文字列キーで統一（LocalStorage保存後も一致するよう）
-  state.monthData[currentMonth][String(currentEmpId)] = rows;
+  state.monthData[currentMonth][id] = currRows;
 }
 
 // ===== PASTE & DIFF IMPORT =====
@@ -1414,20 +1778,33 @@ function importPaste() {
     if(!Array.isArray(newRows) || newRows.length===0) throw new Error('データが空です');
 
     const existing = getRows();
-    const existingDates = new Set(existing.map(r => r.date));
-    const toAdd = newRows.filter(r => !existingDates.has(r.date));
-    const skipped = newRows.length - toAdd.length;
+    const existingByDate = new Map(existing.map(r => [r.date, r]));
+    const toAdd = [];
+    const toUpdate = [];
+    const unchanged = [];
+    newRows.forEach(r => {
+      const old = existingByDate.get(r.date);
+      if (!old) { toAdd.push(r); return; }
+      const same = (old.clockIn||'')===(r.clockIn||'') && (old.clockOut||'')===(r.clockOut||'') && (old.note||'')===(r.note||'');
+      if (same) unchanged.push(r); else toUpdate.push(r);
+    });
 
-    if(toAdd.length === 0) {
-      showDiffBox(`全${newRows.length}件は既にデータが存在します。上書きは行いませんでした。`, 'warn');
+    if(toAdd.length === 0 && toUpdate.length === 0) {
+      showDiffBox(`全${newRows.length}件は既存データと同一です。変更はありませんでした。`, 'warn');
       return;
     }
 
-    // ③ 確認ダイアログ：従業員名を明示
-    const confirmMsg = `【${emp ? emp.name : '不明'}】のデータに${toAdd.length}件を追加します。\n${skipped > 0 ? `（既存データ${skipped}件はスキップ）\n` : ''}\n追加する日付：${toAdd.slice(0,5).map(r=>r.date).join('、')}${toAdd.length>5?`… 他${toAdd.length-5}件`:''}\n\nよろしいですか？`;
+    // ③ 確認ダイアログ：従業員名を明示。新規追加と上書き更新を分けて表示
+    let confirmMsg = `【${emp ? emp.name : '不明'}】のデータを更新します。\n`;
+    if (toAdd.length)    confirmMsg += `\n＋新規追加：${toAdd.length}件（${toAdd.slice(0,5).map(r=>r.date).join('、')}${toAdd.length>5?'…他':''}）`;
+    if (toUpdate.length) confirmMsg += `\n★上書き修正：${toUpdate.length}件（既存の出退勤時刻と異なるため更新します）\n　（${toUpdate.slice(0,5).map(r=>r.date).join('、')}${toUpdate.length>5?'…他':''}）`;
+    if (unchanged.length) confirmMsg += `\n（変更なし：${unchanged.length}件はスキップ）`;
+    confirmMsg += '\n\nよろしいですか？';
     if(!confirm(confirmMsg)) return;
 
-    const merged = [...existing, ...toAdd].sort((a,b) => a.date.localeCompare(b.date));
+    const updateDates = new Set(toUpdate.map(r => r.date));
+    const kept = existing.filter(r => !updateDates.has(r.date));
+    const merged = [...kept, ...toAdd, ...toUpdate].sort((a,b) => a.date.localeCompare(b.date));
     setRows(merged);
     saveState();
     renderEmpTabs();
@@ -1438,12 +1815,13 @@ function importPaste() {
     updateGuide();
     // 差分追加後に貼り付け欄を自動クリア
     clearPaste();
-    const msg = skipped > 0
-      ? `✓ ${toAdd.length}件を追加しました。${skipped}件は既存データがあるためスキップ（修正済みデータは保持）`
-      : `✓ ${toAdd.length}件を追加しました`;
-    showDiffBox(msg, 'ok');
+    const parts = [];
+    if (toAdd.length) parts.push(`新規${toAdd.length}件`);
+    if (toUpdate.length) parts.push(`上書き${toUpdate.length}件`);
+    if (unchanged.length) parts.push(`変更なし${unchanged.length}件はスキップ`);
+    showDiffBox(`✓ ${parts.join('、')}`, 'ok');
     setStatus(`✓ ${merged.length}件のデータが保存済みです`);
-    toast('差分追加完了！');
+    toast('反映完了！');
   } catch(err) {
     alert('読み込みエラー：' + err.message);
   }
@@ -1475,10 +1853,38 @@ function saveCurrentData() {
 function toMin(t) { if(!t) return null; const[h,m]=t.split(':').map(Number); return h*60+m; }
 function floor30(h) { return Math.floor(h*2)/2; }
 
-function calcTimes(clockIn, clockOut, emp) {
-  const r = {actual:0, early:0, overtime:0, late:0};
+// NaN/Infinity対策：不正な打刻データ等で計算がNaNになった場合に0へフォールバック（Excel破損防止）
+function safeNum(x) {
+  return (typeof x === 'number' && isFinite(x)) ? x : 0;
+}
+
+// 土曜・日曜を休日とみなす
+function isHolidayDate(dateStr) {
+  const w = getWeekday(dateStr);
+  return w === 0 || w === 6; // 0=日, 6=土
+}
+
+// ★ その日が「全休」の有休登録かどうか（タイムカードの誤入力より有休登録を優先するため）
+//   半休（0.5日等）は実際に勤務している時間があるため、タイムカードの計算を優先する
+function isVacationUsed(empId, dateStr) {
+  if (!empId || !dateStr) return false;
+  const totalDays = (state.vacation.uses || [])
+    .filter(u => String(u.empId) === String(empId) && u.date === dateStr)
+    .reduce((s,u) => s + (parseFloat(u.days)||0), 0);
+  return totalDays >= 1;
+}
+
+function calcTimes(clockIn, clockOut, emp, dateStr) {
+  const r = {actual:0, early:0, overtime:0, late:0, holidayOT:0, isHoliday:false, isVacation:false};
   const stdHours = emp ? parseFloat(emp.stdHours)||8 : 8;
   const empType  = emp ? (emp.empType || 'fulltime') : 'fulltime'; // fulltime / part
+
+  // ★ 有休登録がある日は、タイムカードに誤って打刻データが入っていても必ず有休を優先する
+  if (emp && dateStr && isVacationUsed(emp.id, dateStr)) {
+    r.isVacation = true;
+    return r;
+  }
+
   if(!clockIn || !clockOut) return r;
 
   const inM      = toMin(clockIn);
@@ -1488,56 +1894,83 @@ function calcTimes(clockIn, clockOut, emp) {
   const earlyM   = toMin(state.cfg.earlyStart);   // 07:00
   const otStartM = toMin(state.cfg.otStart);      // 17:10
 
-  // ── 早出ルール（正社員のみ） ──
-  // 7:00より前に出勤した場合のみ早出（7:00〜8:00の1h）
-  // 7:01〜8:00は早出なし
-  const effectiveInM = inM < earlyM ? earlyM : (inM < startM ? startM : inM);
-  if(empType === 'fulltime' && inM < earlyM) {
-    r.early = floor30((startM - earlyM) / 60); // 7:00〜8:00 = 1.0h
-  } else {
-    r.early = 0;
-  }
+  const isHoliday = dateStr ? isHolidayDate(dateStr) : false;
+  r.isHoliday = isHoliday;
 
-  // ── 休憩（実働時間帯に重なる分のみ）──
+  // ── 休憩（実際の出退勤時間に重なる分のみ）──
   let breakMin = 0;
   state.cfg.breaks.forEach(b => {
     const bs = toMin(b.from), be = toMin(b.to);
-    const oS = Math.max(effectiveInM, bs), oE = Math.min(outM, be);
+    const oS = Math.max(inM, bs), oE = Math.min(outM, be);
     if(oE > oS) breakMin += oE - oS;
   });
 
-  // ── 実働（effectiveInM〜退勤 - 休憩）──
-  const totalMin = outM - effectiveInM - breakMin;
-  r.actual = Math.max(0, floor30(totalMin / 60));
+  // ── 実働（出勤〜退勤の真の時間 − 休憩。変則勤務（出退勤がずれていても実働は変わらない）にも正しく対応するため、早出クランプは行わない）──
+  const totalMin = outM - inM - breakMin;
+  r.actual = safeNum(Math.max(0, floor30(totalMin / 60)));
 
-  // ── 遅早の判定 ──
-  // 正社員：打刻ベース（8:00より遅い出勤 or 17:00より早い退勤）
-  // パート：実働時間 vs 所定時間の差分
-  if(empType === 'part') {
-    // パート：実働が所定時間より少なければ遅早
-    const diff = stdHours - r.actual;
-    r.late = diff > 0 ? floor30(diff) : 0;
-  } else {
-    // 正社員：打刻ベース
-    if(inM > startM) {
-      r.late = floor30((inM - startM) / 60);
-    } else if(outM < endM) {
-      r.late = floor30((endM - outM) / 60);
-    } else {
-      r.late = 0;
-    }
+  // ── 休日出勤：早出・遅刻・通常残業の概念なし。実働時間は全て休日残業として計上 ──
+  if (isHoliday) {
+    r.early = 0;
+    r.late = 0;
+    r.overtime = 0;
+    r.holidayOT = safeNum((emp && !emp.hasOT) ? 0 : r.actual);
+    return r;
   }
+
+  // ── 早出・夕刻残業の「候補値」（打刻位置ベースの従来ロジック。1時間以上超過した場合のみ採用）──
+  const earlyCandidate = (empType !== 'part' && inM < earlyM) ? floor30((startM - earlyM) / 60) : 0; // 7:00〜8:00=1.0h（パート以外は対象）
+  const otCandidate    = outM > otStartM ? floor30((outM - otStartM) / 60) : 0;
+
+  // ── 変則勤務対応：実働時間が所定労働時間と比べて±1時間を超えて初めて残業・遅刻早退と認定 ──
+  // （出退勤がずれているだけで実働が所定通りなら、早出・残業・遅刻早退いずれも「無し」とする）
+  const diff = r.actual - stdHours;
+  if (diff >= 1) {
+    const excess = floor30(diff);
+    const candTotal = earlyCandidate + otCandidate;
+    // 出勤がずれている等で打刻位置ベースの候補値が実際の超過時間より大きい場合は、
+    // 実際の超過時間（excess）に収まるよう配分し直す（変則勤務での残業過大計上を防止）
+    if (candTotal > excess && candTotal > 0) {
+      const ratio = excess / candTotal;
+      r.early    = floor30(earlyCandidate * ratio);
+      r.overtime = floor30(excess - r.early);
+    } else {
+      r.early    = earlyCandidate;
+      r.overtime = otCandidate;
+    }
+    r.late     = 0;
+  } else if (diff <= -1) {
+    r.early    = 0;
+    r.overtime = 0;
+    r.late     = floor30(-diff);
+  } else {
+    r.early    = 0;
+    r.overtime = 0;
+    r.late     = 0;
+  }
+
+  // ★ 総実働の考え方：
+  //   ・残業（diff>=1）：超過分は早出残業/夕刻残業の別欄で管理するため、総実働は所定労働時間に固定（二重計上防止）
+  //   ・遅刻早退・半休等（diff<=-1）：不足分を補う別欄は無いため、実際に働いた時間（real actual）をそのまま反映する
+  //   ・誤差±1時間未満の変則勤務：所定労働時間に固定（軽微な前後を許容）
+  if (diff > -1) {
+    r.actual = stdHours;
+  }
+  // diff<=-1 の場合は r.actual（実際の出退勤から算出した実働時間）をそのまま使用
 
   // ── 残業対象外（管理職等）──
   if(emp && !emp.hasOT) {
     r.overtime = 0;
     r.early = 0;
     r.late = 0; // 遅早も対象外
-    if(r.late === 0) r.actual = stdHours;
-  } else {
-    // 残業対象あり：otStart(17:10)以降を残業（30分単位切り捨て）
-    r.overtime = outM > otStartM ? floor30((outM - otStartM) / 60) : 0;
   }
+
+  // ★ 打刻データの形式不正（時刻が読み取れない等）でNaNが混入した場合の保険
+  r.actual    = safeNum(r.actual);
+  r.early     = safeNum(r.early);
+  r.overtime  = safeNum(r.overtime);
+  r.late      = safeNum(r.late);
+  r.holidayOT = safeNum(r.holidayOT);
 
   return r;
 }
@@ -1581,8 +2014,8 @@ function getDayCell(dateStr) {
 }
 
 function renderTable() {
-  const sortedRows = getSortedRows();
   const rawRows = getRows();
+  const sortedRows = [...rawRows].sort((a, b) => sortKey21(a.date).localeCompare(sortKey21(b.date)));
   const emp = state.empMasters.find(e => e.id===currentEmpId);
   const tbody = document.getElementById('tableBody');
   tbody.innerHTML = '';
@@ -1591,27 +2024,33 @@ function renderTable() {
     return;
   }
   sortedRows.forEach((r) => {
-    // rawRowsの中のインデックスを特定（削除・更新に使用）
-    const rawIdx = rawRows.findIndex(rr => rr.date === r.date);
-    const t = calcTimes(r.clockIn, r.clockOut, emp);
+    // 同じオブジェクト参照でインデックス特定（日付重複があっても確実）
+    const rawIdx = rawRows.indexOf(r);
+    const t = calcTimes(r.clockIn, r.clockOut, emp, r.date);
+    const isHoliday = t.isHoliday;
     // 手動上書き値があればそちらを優先
     const earlyVal  = r._earlyOverride  != null ? r._earlyOverride  : (t.early  != null ? t.early  : 0);
     const actualVal = r._actualOverride != null ? r._actualOverride : (t.actual != null ? t.actual : 0);
-    const otVal     = r._otOverride     != null ? r._otOverride     : (t.overtime != null ? t.overtime : 0);
+    // 休日出勤は残業欄に休日残業（実働全額）を表示
+    const otVal     = r._otOverride     != null ? r._otOverride     : (isHoliday ? (t.holidayOT || 0) : (t.overtime != null ? t.overtime : 0));
     const lateVal   = r._lateOverride   != null ? r._lateOverride   : (t.late   != null ? t.late   : 0);
 
-    const warn = !r.clockIn || !r.clockOut;
+    const isVacation = t.isVacation;
+    const warn = !isVacation && (!r.clockIn || !r.clockOut);
     const hasNote = r.note && r.note !== '';
-    const bTxt = hasNote ? r.note : warn ? '要確認' : '正常';
-    const bCls = r.note==='休日出勤'?'badge-info': r.note==='休日'?'badge-gray': warn?'badge-warn':'badge-ok';
+    const worked = r.clockIn && r.clockOut;
+    const bTxt = isVacation ? '有休' : (isHoliday && worked) ? '休日出勤' : hasNote ? r.note : warn ? '要確認' : '正常';
+    const bCls = isVacation ? 'badge-info' : (isHoliday && worked) ? 'badge-info' : r.note==='休日'?'badge-gray': warn?'badge-warn':'badge-ok';
     const isNew = r._new;
     const tr = document.createElement('tr');
     if(isNew) tr.className = 'row-new';
+    if(isVacation) tr.style.background = 'var(--success-bg, #E6F9F0)';
+    else if(isHoliday) tr.style.background = worked ? 'var(--info-bg, #EAF2FB)' : 'var(--surface2)';
 
-    // 残業対象外の色設定
+    // 残業対象外の色設定（休日出勤は休日残業として常に色付け表示）
     const otDisplay = !emp || !emp.hasOT
       ? `<input type="number" value="0" step="0.5" style="width:50px;text-align:right;font-family:var(--mono);background:var(--surface2);color:var(--text2)" readonly tabindex="-1">`
-      : `<input type="number" value="${otVal.toFixed(1)}" step="0.5" style="width:50px;text-align:right;font-family:var(--mono)${otVal>0?';color:var(--danger)':''}" onchange="updRowOverride(${rawIdx},'_otOverride',this.value)">`;
+      : `<input type="number" value="${otVal.toFixed(1)}" step="0.5" style="width:50px;text-align:right;font-family:var(--mono)${otVal>0?(isHoliday?';color:#185FA5':';color:var(--danger)'):''}" onchange="updRowOverride(${rawIdx},'_otOverride',this.value)">`;
 
     const lateDisplay = lateVal > 0
       ? `<input type="number" value="${lateVal.toFixed(1)}" step="0.5" style="width:50px;text-align:right;font-family:var(--mono);color:var(--warn)" onchange="updRowOverride(${rawIdx},'_lateOverride',this.value)">`
@@ -1688,58 +2127,76 @@ function addRow() {
 function calcSummary() {
   const rows = getRows();
   const emp = state.empMasters.find(e => e.id===currentEmpId);
-  let days=0, total=0, early=0, ot=0, late=0, issues=0;
+  let days=0, holidayDays=0, total=0, early=0, ot=0, holidayOT=0, late=0, issues=0;
   rows.forEach(r => {
+    const t = calcTimes(r.clockIn, r.clockOut, emp, r.date);
+    if (t.isVacation) { return; } // 有休日はカウントしない（要確認にもしない）
     if(r.clockIn && r.clockOut) {
-      days++;
-      const t = calcTimes(r.clockIn, r.clockOut, emp);
-      const earlyVal  = r._earlyOverride  != null ? r._earlyOverride  : (t.early  || 0);
-      const actualVal = r._actualOverride != null ? r._actualOverride : (t.actual || 0);
-      const otVal     = r._otOverride     != null ? r._otOverride     : (t.overtime || 0);
-      const lateVal   = r._lateOverride   != null ? r._lateOverride   : (t.late   || 0);
-      total += actualVal;
-      early += earlyVal;
-      ot    += otVal;
-      late  += lateVal;
+      const earlyVal  = safeNum(r._earlyOverride  != null ? parseFloat(r._earlyOverride)  : t.early);
+      const actualVal = safeNum(r._actualOverride != null ? parseFloat(r._actualOverride) : t.actual);
+      const otVal      = safeNum(r._otOverride     != null ? parseFloat(r._otOverride)     : t.overtime);
+      const lateVal    = safeNum(r._lateOverride   != null ? parseFloat(r._lateOverride)   : t.late);
+      if (t.isHoliday) {
+        holidayDays++;
+        holidayOT += t.holidayOT || 0;
+      } else {
+        days++;
+        total += actualVal;
+        early += earlyVal;
+        ot    += otVal;
+        late  += lateVal;
+      }
     } else { issues++; }
   });
   document.getElementById('s-days').innerHTML  = days+'<span class="s-unit"> 日</span>';
+  document.getElementById('s-holiday-days').innerHTML = holidayDays+'<span class="s-unit"> 日</span>';
   document.getElementById('s-total').innerHTML = total.toFixed(1)+'<span class="s-unit"> h</span>';
   document.getElementById('s-early').innerHTML = early.toFixed(1)+'<span class="s-unit"> h</span>';
   document.getElementById('s-ot').innerHTML    = ot.toFixed(1)+'<span class="s-unit"> h</span>';
+  document.getElementById('s-holiday-ot').innerHTML = holidayOT.toFixed(1)+'<span class="s-unit"> h</span>';
   document.getElementById('s-late').innerHTML  = late>0?late.toFixed(1)+'<span class="s-unit"> h</span>':'—';
   document.getElementById('s-issues').innerHTML= issues+'<span class="s-unit"> 件</span>';
 }
 
 function renderAllSummary() {
   const container = document.getElementById('allSummary');
-  const monthData = state.monthData[currentMonth] || {};
-  const withData = sortedEmps().filter(e => (monthData[String(e.id)]||monthData[e.id]||[]).length>0);
+  const withData = sortedEmps().filter(e => getCardRows(e.id, currentMonth).length > 0);
   if(!withData.length) {
     container.innerHTML = `<div style="text-align:center;padding:1.5rem;color:var(--text2);font-size:13px">データを入力するとここに集計が表示されます</div>`;
     return;
   }
   container.innerHTML = '';
   withData.forEach(emp => {
-    const rows = monthData[String(emp.id)]||monthData[emp.id]||[];
-    let days=0, total=0, early=0, ot=0;
+    const rows = getCardRows(emp.id, currentMonth);
+    let days=0, holidayDays=0, total=0, early=0, ot=0, holidayOT=0;
     rows.forEach(r => {
       if(r.clockIn&&r.clockOut) {
-        days++;
-        const t=calcTimes(r.clockIn,r.clockOut,emp);
-        if(t.actual!=null)total+=t.actual;
-        if(t.early!=null)early+=t.early;
-        if(t.overtime!=null)ot+=t.overtime;
+        const t=calcTimes(r.clockIn,r.clockOut,emp,r.date);
+        if (t.isVacation) return; // 有休日はカウントしない
+        const actualVal = safeNum(r._actualOverride != null ? parseFloat(r._actualOverride) : t.actual);
+        const earlyVal   = safeNum(r._earlyOverride  != null ? parseFloat(r._earlyOverride)  : t.early);
+        const otVal      = safeNum(r._otOverride     != null ? parseFloat(r._otOverride)     : t.overtime);
+        if (t.isHoliday) {
+          holidayDays++;
+          holidayOT += t.holidayOT || 0;
+        } else {
+          days++;
+          total += actualVal;
+          early += earlyVal;
+          ot    += otVal;
+        }
       }
     });
     const card = document.createElement('div');
     card.className = 'emp-s-card';
     card.innerHTML = `<h4>${emp.name}</h4>
       <div class="rows">
-        出勤日数　<span>${days} 日</span><br>
-        総実働　　<span>${total.toFixed(1)} h</span><br>
-        早出残業　<span>${early.toFixed(1)} h</span><br>
-        夕刻残業　<span>${emp.hasOT?ot.toFixed(1)+' h':'対象外'}</span>
+        出勤日数　　<span>${days} 日</span><br>
+        休日出勤日数<span>${holidayDays} 日</span><br>
+        総実働　　　<span>${total.toFixed(1)} h</span><br>
+        早出残業　　<span>${early.toFixed(1)} h</span><br>
+        夕刻残業　　<span>${emp.hasOT?ot.toFixed(1)+' h':'対象外'}</span><br>
+        休日残業　　<span>${holidayOT.toFixed(1)} h</span>
       </div>`;
     container.appendChild(card);
   });
@@ -1817,42 +2274,124 @@ function showXlsOption() {
     sel.appendChild(o);
   });
   sel.value = cur;
-  updateXlsPreview();
+
+  // 出力対象（全員＋個人名）セレクトを最新化
+  const empSel = document.getElementById('xlsTargetEmp');
+  const curEmp = empSel.value;
+  empSel.innerHTML = '<option value="">全員</option>';
+  sortedEmps().forEach(e => {
+    const o = document.createElement('option');
+    o.value = String(e.id);
+    o.textContent = (e.empNo ? e.empNo + ' ' : '') + e.name;
+    empSel.appendChild(o);
+  });
+  empSel.value = curEmp;
+
+  // 年月範囲：開いた画面の対象月を毎回セット（前回の指定を引きずらない）
+  document.getElementById('xlsYmFrom').value = xlsTargetYm;
+  document.getElementById('xlsYmTo').value   = xlsTargetYm;
+
+  onXlsTargetChange();
   document.getElementById('xlsxOptionModal').classList.add('show');
 }
 function hideXlsOption() {
   document.getElementById('xlsxOptionModal').classList.remove('show');
 }
 
+// 開始年月＞終了年月の場合は自動で揃える
+function onXlsRangeChange() {
+  const fromEl = document.getElementById('xlsYmFrom');
+  const toEl   = document.getElementById('xlsYmTo');
+  if (fromEl.value && toEl.value && fromEl.value > toEl.value) toEl.value = fromEl.value;
+  updateXlsPreview();
+}
+
+// 個人指定時は部署・雇用区分の絞り込みを隠す
+function onXlsTargetChange() {
+  const isIndividual = !!document.getElementById('xlsTargetEmp').value;
+  document.getElementById('xlsFilterGroup').style.display = isIndividual ? 'none' : '';
+  updateXlsPreview();
+}
+
+// 指定範囲の年月配列を返す
+function getXlsYmList() {
+  const from = document.getElementById('xlsYmFrom').value || xlsTargetYm;
+  const to   = document.getElementById('xlsYmTo').value   || from;
+  const list = [];
+  let [y, m] = from.split('-').map(Number);
+  const [ey, em] = to.split('-').map(Number);
+  let guard = 0;
+  while ((y < ey || (y === ey && m <= em)) && guard++ < 120) {
+    list.push(y + '-' + String(m).padStart(2, '0'));
+    m++; if (m > 12) { m = 1; y++; }
+  }
+  return list;
+}
+
 function getXlsFilteredEmps(ym) {
+  const targetId = document.getElementById('xlsTargetEmp').value;
+  if (targetId) {
+    // 個人指定：その社員のみ（データの有無に関わらず対象に含める）
+    return sortedEmps().filter(e => String(e.id) === String(targetId));
+  }
   const dept = document.getElementById('xlsDeptFilter').value;
   const chkFull = document.getElementById('xlsChkFulltime').checked;
   const chkCont = document.getElementById('xlsChkContract').checked;
   const chkPart = document.getElementById('xlsChkPart').checked;
-  const monthData = state.monthData[ym] || {};
   return sortedEmps().filter(e => {
     if (dept && e.dept !== dept) return false;
     const type = e.empType || 'fulltime';
     if (type === 'fulltime' && !chkFull) return false;
     if (type === 'contract' && !chkCont) return false;
     if (type === 'part' && !chkPart) return false;
-    return (monthData[String(e.id)] || monthData[e.id] || []).length > 0;
+    return getCardRows(e.id, ym).length > 0;
   });
 }
 
+// 範囲内のいずれかの月で対象となる社員（重複排除）
+function getXlsFilteredEmpsRange(ymList) {
+  const seen = new Set();
+  const out = [];
+  ymList.forEach(ym => {
+    getXlsFilteredEmps(ym).forEach(e => {
+      if (!seen.has(String(e.id))) { seen.add(String(e.id)); out.push(e); }
+    });
+  });
+  return out;
+}
+
 function updateXlsPreview() {
-  const emps = getXlsFilteredEmps(xlsTargetYm);
-  const dept = document.getElementById('xlsDeptFilter').value;
-  const deptLabel = dept ? `「${dept}」` : '全部署';
+  const ymList = getXlsYmList();
+  const emps = getXlsFilteredEmpsRange(ymList);
+  const targetId = document.getElementById('xlsTargetEmp').value;
+  const sheetType = document.getElementById('xlsSheetType').value;
+  const sheetLabels = {
+    all:'すべて', summary:'全員サマリー', payroll:'給与入力用',
+    personal:'個人勤怠データ', attendance:'個人出勤簿'
+  };
+  let targetLabel;
+  if (targetId) {
+    const e = state.empMasters.find(x => String(x.id) === String(targetId));
+    targetLabel = e ? e.name : '個人';
+  } else {
+    const dept = document.getElementById('xlsDeptFilter').value;
+    targetLabel = dept ? `「${dept}」` : '全部署';
+  }
+  const periodLabel = ymList.length <= 1
+    ? (ymList[0] || '').replace('-', '年') + '月'
+    : `${ymList[0].replace('-','年')}月〜${ymList[ymList.length-1].replace('-','年')}月（${ymList.length}ヶ月）`;
   document.getElementById('xlsPreview').innerHTML =
-    `対象：<strong>${emps.length}名</strong>（${deptLabel} / ${xlsTargetYm.replace('-','年')}月）`;
+    `対象：<strong>${emps.length}名</strong>（${targetLabel}）<br>期間：${periodLabel}<br>シート：${sheetLabels[sheetType]}`;
 }
 
 function executeXlsDownload() {
-  const emps = getXlsFilteredEmps(xlsTargetYm);
+  const ymList = getXlsYmList();
+  if (!ymList.length) { alert('対象期間を指定してください'); return; }
+  const emps = getXlsFilteredEmpsRange(ymList);
   if (!emps.length) { alert('対象のデータがありません'); return; }
+  const sheetType = document.getElementById('xlsSheetType').value;
   hideXlsOption();
-  downloadMonthFiltered(xlsTargetYm, emps);
+  downloadMonthFiltered(ymList, emps, sheetType);
 }
 
 function downloadMonth(ym) {
@@ -1860,94 +2399,282 @@ function downloadMonth(ym) {
   showXlsOption();
 }
 
-function downloadMonthFiltered(ym, withData) {
-  const monthData = state.monthData[ym] || {};
-  if(!withData.length) { alert('データがありません'); return; }
+// カード期間内の平日（月〜金）数を返す
+function countWeekdaysInCard(ym) {
+  const { prevYM, closing } = getCardMonthRange(ym);
+  const dates = [];
+  if (!prevYM) {
+    const [y,m] = ym.split('-').map(Number);
+    const last = new Date(y, m, 0).getDate();
+    for (let d=1; d<=last; d++) dates.push(`${ym}-${String(d).padStart(2,'0')}`);
+  } else {
+    const [py,pm] = prevYM.split('-').map(Number);
+    const lastPrev = new Date(py, pm, 0).getDate();
+    for (let d=closing+1; d<=lastPrev; d++) dates.push(`${prevYM}-${String(d).padStart(2,'0')}`);
+    for (let d=1; d<=closing; d++) dates.push(`${ym}-${String(d).padStart(2,'0')}`);
+  }
+  return dates.filter(ds => { const w = getWeekday(ds); return w>=1 && w<=5; }).length;
+}
+
+// カード期間内の有休取得日数を返す
+function calcVacDaysInCard(empId, ym) {
+  const { prevYM, closing } = getCardMonthRange(ym);
+  return (state.vacation.uses || []).filter(u => {
+    if (String(u.empId) !== String(empId) || !u.date) return false;
+    const d = u.date;
+    if (!prevYM) return d.slice(0,7) === ym;
+    const inPrev = d.slice(0,7)===prevYM && parseInt(d.slice(8))>closing;
+    const inCurr = d.slice(0,7)===ym    && parseInt(d.slice(8))<=closing;
+    return inPrev || inCurr;
+  }).reduce((s,u) => s + (parseFloat(u.days)||0), 0);
+}
+
+// 給与入力用シート1名分の集計（休日＝土日、深夜＝22:00以降、60h超は普通+深夜+休出の合計から）
+function calcPayrollRow(emp, ym) {
+  const rows = getCardRows(emp.id, ym);
+  let workDays=0, holidayDays=0, total=0, lateSum=0, otNormal=0, otNight=0, otHoliday=0;
+  rows.forEach(r => {
+    if (!r.clockIn || !r.clockOut) return;
+    const t = calcTimes(r.clockIn, r.clockOut, emp, r.date);
+    if (t.isVacation) return; // 有休日は出勤日数等にカウントしない（有休日数は別途calcVacDaysInCardで集計）
+    const actualVal = safeNum(r._actualOverride != null ? parseFloat(r._actualOverride) : t.actual);
+    const earlyVal  = safeNum(r._earlyOverride  != null ? parseFloat(r._earlyOverride)  : t.early);
+    const otVal     = safeNum(r._otOverride     != null ? parseFloat(r._otOverride)     : t.overtime);
+    const lateVal   = safeNum(r._lateOverride   != null ? parseFloat(r._lateOverride)   : t.late);
+    if (t.isHoliday) {
+      holidayDays++;
+      otHoliday += t.holidayOT || 0;
+    } else {
+      workDays++;
+      total += actualVal;
+      lateSum  += lateVal;
+      otNormal += earlyVal + otVal;
+      const outM = toMin(r.clockOut);
+      const nightStartM = 22*60;
+      if (outM > nightStartM) otNight += floor30((outM - nightStartM)/60);
+    }
+  });
+  const otTotal = otNormal + otNight + otHoliday;
+  const over60  = otTotal > 60 ? parseFloat((otTotal-60).toFixed(1)) : 0;
+  const vacDays = calcVacDaysInCard(emp.id, ym);
+  const weekdayCount = countWeekdaysInCard(ym);
+  const absentDays = Math.max(0, weekdayCount - workDays - vacDays);
+  return { hasData: rows.length>0, workDays, holidayDays, vacDays, absentDays, total, lateSum, otNormal, otNight, otHoliday, over60 };
+}
+
+// 全員サマリー1行分の集計（休日出勤の日数・時間も併せて返す）
+function calcSummaryRow(emp, ym) {
+  const rows = getCardRows(emp.id, ym);
+  let days=0,total=0,early=0,ot=0,late=0,issues=0,holidayDays=0,holidayOT=0;
+  rows.forEach(r=>{
+    const t=calcTimes(r.clockIn,r.clockOut,emp,r.date);
+    if (t.isVacation) return; // 有休日はカウントしない
+    if (t.isHoliday) {
+      // 休日出勤：日数と休出残業のみ集計（総実働・平日残業には含めない）
+      if (r.clockIn && r.clockOut) { holidayDays++; holidayOT += safeNum(t.holidayOT); }
+      else { issues++; }
+      return;
+    }
+    if(r.clockIn&&r.clockOut){
+      days++;
+      total += safeNum(r._actualOverride != null ? parseFloat(r._actualOverride) : t.actual);
+      early += safeNum(r._earlyOverride  != null ? parseFloat(r._earlyOverride)  : t.early);
+      ot    += safeNum(r._otOverride     != null ? parseFloat(r._otOverride)     : t.overtime);
+      late  += safeNum(r._lateOverride   != null ? parseFloat(r._lateOverride)   : t.late);
+    } else { issues++; }
+  });
+  return { hasData: rows.length>0, days, holidayDays, total, early, ot, late, holidayOT, issues };
+}
+
+// Excelシート名を一意化（31文字制限・重複禁止）
+function uniqueSheetName(wb, base) {
+  let name = base.replace(/[:\\/?\[\]*'"]/g,'').slice(0,31) || 'sheet';
+  if (!wb.SheetNames.includes(name)) return name;
+  for (let i = 2; i < 1000; i++) {
+    const suffix = '_' + i;
+    const cand = name.slice(0, 31 - suffix.length) + suffix;
+    if (!wb.SheetNames.includes(cand)) return cand;
+  }
+  return name.slice(0,28) + Math.floor(Math.random()*900+100);
+}
+
+function downloadMonthFiltered(ymArg, withData, sheetType) {
+  const ymList = Array.isArray(ymArg) ? ymArg : [ymArg];
+  sheetType = sheetType || 'all';
+  if(!withData.length || !ymList.length) { alert('データがありません'); return; }
   const wb = XLSX.utils.book_new();
+  const multi = ymList.length > 1;
+  const want = k => sheetType === 'all' || sheetType === k;
+  // 個人指定 or 部署/雇用区分で絞り込み中かどうか（給与入力用の対象者判定に使う）
+  const targetSelEl = document.getElementById('xlsTargetEmp');
+  const deptSelEl   = document.getElementById('xlsDeptFilter');
+  const isFiltered  = !!((targetSelEl && targetSelEl.value) || (deptSelEl && deptSelEl.value));
 
-  // サマリー
-  const sumData = [['社員番号','氏名','部署','対象年月','出勤日数','総実働(h)','早出残業(h)','夕刻残業(h)','遅刻早退(h)','要確認','残業対象']];
-  withData.forEach(emp => {
-    const rows = monthData[String(emp.id)]||monthData[emp.id]||[];
-    let days=0,total=0,early=0,ot=0,late=0,issues=0;
-    rows.forEach(r=>{
-      if(r.clockIn&&r.clockOut){days++;const t=calcTimes(r.clockIn,r.clockOut,emp);if(t.actual!=null){total+=t.actual;early+=t.early||0;if(t.overtime!=null)ot+=t.overtime;if(t.late!=null)late+=t.late;}}else{issues++;}
+  // ===== ① 全員サマリー（休出日数・休出残業を追加） =====
+  if (want('summary')) {
+    const sumData = [['社員番号','氏名','部署','対象年月','出勤日数','休出日数','総実働(h)','早出残業(h)','夕刻残業(h)','遅刻早退(h)','休出残業(h)','要確認','残業対象']];
+    ymList.forEach(ym => {
+      withData.forEach(emp => {
+        const s = calcSummaryRow(emp, ym);
+        if (multi && !s.hasData) return; // 複数月出力時はデータの無い月は行を作らない
+        sumData.push([emp.empNo||'',emp.name,emp.dept,ym,
+          s.days, s.holidayDays,
+          parseFloat(s.total.toFixed(2)), parseFloat(s.early.toFixed(2)),
+          emp.hasOT?parseFloat(s.ot.toFixed(2)):'対象外',
+          parseFloat(s.late.toFixed(2)),
+          emp.hasOT?parseFloat(s.holidayOT.toFixed(2)):'対象外',
+          s.issues, emp.hasOT?'あり':'なし']);
+      });
     });
-    sumData.push([emp.empNo||'',emp.name,emp.dept,ym,days,
-      parseFloat(total.toFixed(2)),parseFloat(early.toFixed(2)),
-      emp.hasOT?parseFloat(ot.toFixed(2)):'対象外',
-      parseFloat(late.toFixed(2)),issues,emp.hasOT?'あり':'なし']);
-  });
-  const wss = XLSX.utils.aoa_to_sheet(sumData);
-  wss['!cols']=[{wch:10},{wch:14},{wch:10},{wch:10},{wch:10},{wch:12},{wch:14},{wch:14},{wch:14},{wch:10},{wch:10}];
-  XLSX.utils.book_append_sheet(wb, wss, '全員サマリー');
+    const wss = XLSX.utils.aoa_to_sheet(sumData);
+    wss['!cols']=[{wch:10},{wch:14},{wch:10},{wch:10},{wch:10},{wch:10},{wch:12},{wch:14},{wch:14},{wch:14},{wch:14},{wch:10},{wch:10}];
+    XLSX.utils.book_append_sheet(wb, wss, '全員サマリー');
+  }
 
-  // 個人別
-  withData.forEach(emp => {
-    const rawRows = monthData[String(emp.id)]||monthData[emp.id]||[];
-    // 21日始まりでソート
-    const rows = [...rawRows].sort((a,b)=>sortKey21(a.date).localeCompare(sortKey21(b.date)));
-    let days=0,total=0,early=0,ot=0,late=0;
-    const dataRows = rows.map(r=>{
-      const w = getWeekday(r.date);
-      const dj = w >= 0 ? DAYS[w] : '';
-      const t=calcTimes(r.clockIn,r.clockOut,emp);
-      const earlyVal  = r._earlyOverride  != null ? r._earlyOverride  : (t.early  || 0);
-      const actualVal = r._actualOverride != null ? r._actualOverride : (t.actual || 0);
-      const otVal     = r._otOverride     != null ? r._otOverride     : (t.overtime || 0);
-      const lateVal   = r._lateOverride   != null ? r._lateOverride   : (t.late   || 0);
-      if(r.clockIn&&r.clockOut){days++;total+=actualVal;early+=earlyVal;ot+=otVal;late+=lateVal;}
-      return [r.date,dj,r.clockIn||'',r.clockOut||'',
-        parseFloat(earlyVal.toFixed(2)),
-        parseFloat(actualVal.toFixed(2)),
-        emp.hasOT?parseFloat(otVal.toFixed(2)):'対象外',
-        lateVal>0?parseFloat(lateVal.toFixed(2)):'',
-        r.note||(!r.clockIn||!r.clockOut?'要確認':'正常')];
+  // ===== ② 給与入力用（月ごとに1シート） =====
+  if (want('payroll')) {
+    const typeMapPay = { fulltime:'正社員', contract:'契約社員', part:'パート' };
+    // 絞り込み中（個人指定・部署指定）は対象者のみ、それ以外は社員番号順で全員
+    const payrollEmps = isFiltered ? withData : sortedEmps();
+    ymList.forEach(ym => {
+      const payrollData = [
+        [`給与入力用 ${ym.replace('-','年')}月`], [],
+        ['NO.','社員番号','氏名','雇用区分','出勤日数','休出日数','有休日数','欠勤日数','勤務時間(h)','遅早時間(h)','残業_普通(h)','残業_深夜(h)','残業_休出(h)','60時間超(h)','弁当','備考']
+      ];
+      payrollEmps.forEach((emp, i) => {
+        const typeLabel = typeMapPay[emp.empType||'fulltime'];
+        const p = calcPayrollRow(emp, ym);
+        if (!p.hasData) {
+          // タイムカードが無い（役員等）：社員番号・氏名・雇用区分のみ
+          payrollData.push([i+1, emp.empNo||'', emp.name, typeLabel, '','','','','','','','','','','','']);
+          return;
+        }
+        payrollData.push([
+          i+1, emp.empNo||'', emp.name, typeLabel,
+          p.workDays, p.holidayDays, parseFloat(p.vacDays.toFixed(1)), p.absentDays,
+          parseFloat(p.total.toFixed(1)), parseFloat(p.lateSum.toFixed(1)),
+          parseFloat(p.otNormal.toFixed(1)), parseFloat(p.otNight.toFixed(1)), parseFloat(p.otHoliday.toFixed(1)),
+          p.over60, '', ''
+        ]);
+      });
+      const wsPay = XLSX.utils.aoa_to_sheet(payrollData);
+      wsPay['!cols'] = [{wch:5},{wch:10},{wch:14},{wch:10},{wch:9},{wch:9},{wch:9},{wch:9},{wch:11},{wch:10},{wch:12},{wch:12},{wch:12},{wch:10},{wch:8},{wch:18}];
+      XLSX.utils.book_append_sheet(wb, wsPay, uniqueSheetName(wb, multi ? `給与入力用_${ym}` : '給与入力用'));
     });
-    const wsData=[
-      ['従業員名',emp.name,'','部署',emp.dept],
-      ['対象年月',ym,'','所定労働時間',emp.stdHours+'h','残業対象',emp.hasOT?'あり':'なし（管理職等）'],
-      [],
-      ['日付','曜日','出勤','退勤','早出残業(h)','実働(h)','夕刻残業(h)','遅刻早退(h)','備考'],
-    ];
-    dataRows.forEach(row => wsData.push(row));
-    wsData.push([]);
-    wsData.push(['出勤日数',days+'日','総実働',total.toFixed(1)+'h','早出残業',early.toFixed(1)+'h','夕刻残業',emp.hasOT?ot.toFixed(1)+'h':'対象外']);
-    // 出勤簿（21日始まり順）
-    const atData=[
-      ['出　勤　簿'],
-      ['氏名',emp.name,'部署',emp.dept,'対象年月',ym],
-      [],
-      ['日','曜','出勤欠勤','早出残業','遅刻早退','摘要'],
-    ];
-    rows.forEach(r=>{
-      const p = r.date ? r.date.split('-') : [];
-      const day = p.length===3 ? parseInt(p[2]) : '';
-      const w = getWeekday(r.date);
-      const dj = w >= 0 ? DAYS[w] : '';
-      const t=calcTimes(r.clockIn,r.clockOut,emp);
-      const earlyVal = r._earlyOverride != null ? r._earlyOverride : (t.early||0);
-      const lateVal  = r._lateOverride  != null ? r._lateOverride  : (t.late ||0);
-      atData.push([day,dj,r.clockIn||r.clockOut?'出':'',
-        earlyVal>0?earlyVal.toFixed(1):'',
-        lateVal>0?'△'+lateVal.toFixed(1):'',r.note||'']);
+  }
+
+  // ===== ③ 個人勤怠データ ／ ④ 個人出勤簿 =====
+  if (want('personal') || want('attendance')) {
+    ymList.forEach(ym => {
+      withData.forEach(emp => {
+        const rawRows = getCardRows(emp.id, ym);
+        if (!rawRows.length) return; // その月にデータが無ければシートを作らない
+        // 21日始まりでソート
+        const rows = [...rawRows].sort((a,b)=>sortKey21(a.date).localeCompare(sortKey21(b.date)));
+        let days=0,total=0,early=0,ot=0,late=0,holidayDays=0,holidayOT=0;
+        const dataRows = rows.map(r=>{
+          const w = getWeekday(r.date);
+          const dj = w >= 0 ? DAYS[w] : '';
+          const t=calcTimes(r.clockIn,r.clockOut,emp,r.date);
+          const earlyVal  = safeNum(r._earlyOverride  != null ? parseFloat(r._earlyOverride)  : t.early);
+          const actualVal = safeNum(r._actualOverride != null ? parseFloat(r._actualOverride) : t.actual);
+          const otVal     = safeNum(r._otOverride     != null ? parseFloat(r._otOverride)     : t.overtime);
+          const lateVal   = safeNum(r._lateOverride   != null ? parseFloat(r._lateOverride)   : t.late);
+          if (t.isVacation) {
+            return [r.date,dj,r.clockIn||'',r.clockOut||'',0,0,emp.hasOT?0:'対象外','',0,'有休'];
+          }
+          if (t.isHoliday) {
+            if (r.clockIn && r.clockOut) { holidayDays++; holidayOT += safeNum(t.holidayOT); }
+            return [r.date,dj,r.clockIn||'',r.clockOut||'',0,0,emp.hasOT?0:'対象外','',
+              emp.hasOT?parseFloat(safeNum(t.holidayOT).toFixed(2)):'対象外',
+              r.note||(!r.clockIn||!r.clockOut?'要確認':'休日出勤')];
+          }
+          if(r.clockIn&&r.clockOut){days++;total+=actualVal;early+=earlyVal;ot+=otVal;late+=lateVal;}
+          return [r.date,dj,r.clockIn||'',r.clockOut||'',
+            parseFloat(earlyVal.toFixed(2)),
+            parseFloat(actualVal.toFixed(2)),
+            emp.hasOT?parseFloat(otVal.toFixed(2)):'対象外',
+            lateVal>0?parseFloat(lateVal.toFixed(2)):'',
+            0,
+            r.note||(!r.clockIn||!r.clockOut?'要確認':'正常')];
+        });
+
+        // ★ シート名はExcelの31文字制限＋重複禁止があるため、社員番号（＋複数月時は年月）を付けて一意性を確保
+        const snBase = ((emp.empNo?emp.empNo+'_':'')+emp.name).replace(/[:\\/?\[\]*'"]/g,'');
+        const prefix = multi ? ym.slice(2).replace('-','') + '_' : '';
+        const sn = (prefix + snBase).slice(0,27) || ('emp'+emp.id);
+
+        if (want('personal')) {
+          const wsData=[
+            ['従業員名',emp.name,'','部署',emp.dept],
+            ['対象年月',ym,'','所定労働時間',emp.stdHours+'h','残業対象',emp.hasOT?'あり':'なし（管理職等）'],
+            [],
+            ['日付','曜日','出勤','退勤','早出残業(h)','実働(h)','夕刻残業(h)','遅刻早退(h)','休出残業(h)','備考'],
+          ];
+          dataRows.forEach(row => wsData.push(row));
+          wsData.push([]);
+          wsData.push(['出勤日数',days+'日','総実働',total.toFixed(1)+'h','早出残業',early.toFixed(1)+'h','夕刻残業',emp.hasOT?ot.toFixed(1)+'h':'対象外']);
+          wsData.push(['休出日数',holidayDays+'日','休出残業',emp.hasOT?holidayOT.toFixed(1)+'h':'対象外','遅刻早退',late.toFixed(1)+'h']);
+          const ws=XLSX.utils.aoa_to_sheet(wsData);
+          ws['!cols']=[{wch:12},{wch:5},{wch:8},{wch:8},{wch:12},{wch:10},{wch:12},{wch:12},{wch:12},{wch:12}];
+          XLSX.utils.book_append_sheet(wb,ws,uniqueSheetName(wb,sn));
+        }
+
+        if (want('attendance')) {
+          // 出勤簿（21日始まり順）
+          const atData=[
+            ['出　勤　簿'],
+            ['氏名',emp.name,'部署',emp.dept,'対象年月',ym],
+            [],
+            ['日','曜','出勤欠勤','早出残業','遅刻早退','休出残業','摘要'],
+          ];
+          rows.forEach(r=>{
+            const p = r.date ? r.date.split('-') : [];
+            const day = p.length===3 ? parseInt(p[2]) : '';
+            const w = getWeekday(r.date);
+            const dj = w >= 0 ? DAYS[w] : '';
+            const t=calcTimes(r.clockIn,r.clockOut,emp,r.date);
+            if (t.isVacation) {
+              atData.push([day,dj,'有休','','','',r.note||'']);
+              return;
+            }
+            if (t.isHoliday) {
+              const hOT = safeNum(t.holidayOT);
+              atData.push([day,dj,(r.clockIn||r.clockOut)?'休出':'','','',
+                hOT>0?hOT.toFixed(1):'',r.note||'']);
+              return;
+            }
+            const earlyVal = safeNum(r._earlyOverride != null ? parseFloat(r._earlyOverride) : t.early);
+            const lateVal  = safeNum(r._lateOverride  != null ? parseFloat(r._lateOverride)  : t.late);
+            atData.push([day,dj,r.clockIn||r.clockOut?'出':'',
+              earlyVal>0?earlyVal.toFixed(1):'',
+              lateVal>0?'△'+lateVal.toFixed(1):'','',r.note||'']);
+          });
+          atData.push([]);
+          atData.push(['計',days+'日','','早出:'+early.toFixed(1)+'h','遅早:'+late.toFixed(1)+'h','','']);
+          atData.push(['総実働',total.toFixed(1)+'h','','残業',emp.hasOT?ot.toFixed(1)+'h':'対象外','','']);
+          atData.push(['休出日数',holidayDays+'日','','休出残業',emp.hasOT?holidayOT.toFixed(1)+'h':'対象外','','']);
+          const wsAt=XLSX.utils.aoa_to_sheet(atData);
+          wsAt['!cols']=[{wch:5},{wch:5},{wch:10},{wch:10},{wch:10},{wch:10},{wch:16}];
+          XLSX.utils.book_append_sheet(wb,wsAt,uniqueSheetName(wb,(sn+'_出勤簿').slice(0,31)));
+        }
+      });
     });
-    atData.push([]);
-    atData.push(['計',days+'日','','早出:'+early.toFixed(1)+'h','遅早:'+late.toFixed(1)+'h','']);
-    atData.push(['総実働',total.toFixed(1)+'h','','残業',emp.hasOT?ot.toFixed(1)+'h':'対象外','']);
+  }
 
-    const ws=XLSX.utils.aoa_to_sheet(wsData);
-    ws['!cols']=[{wch:12},{wch:5},{wch:8},{wch:8},{wch:12},{wch:10},{wch:12},{wch:12},{wch:12}];
-    const wsAt=XLSX.utils.aoa_to_sheet(atData);
-    wsAt['!cols']=[{wch:5},{wch:5},{wch:10},{wch:10},{wch:10},{wch:16}];
-    const sn=emp.name.replace(/[:\\/?\[\]*]/g,'').slice(0,25);
-    XLSX.utils.book_append_sheet(wb,ws,sn);
-    XLSX.utils.book_append_sheet(wb,wsAt,sn+'_出勤簿');
-  });
+  if (!wb.SheetNames.length) { alert('出力対象のデータがありません'); return; }
 
+  // ファイル名：期間＋対象＋シート種別
+  const targetSel = document.getElementById('xlsTargetEmp');
+  const targetId  = targetSel ? targetSel.value : '';
   const dept = document.getElementById('xlsDeptFilter') ? document.getElementById('xlsDeptFilter').value : '';
-  const suffix = dept ? `_${dept}` : '';
-  XLSX.writeFile(wb, `勤怠_${ym}${suffix}.xlsx`);
+  let suffix = '';
+  if (targetId && withData.length === 1) suffix = `_${withData[0].name}`;
+  else if (dept) suffix = `_${dept}`;
+  const sheetSuffixMap = { summary:'_サマリー', payroll:'_給与入力用', personal:'_勤怠データ', attendance:'_出勤簿' };
+  suffix += (sheetSuffixMap[sheetType] || '');
+  const periodPart = multi ? `${ymList[0]}_${ymList[ymList.length-1]}` : ymList[0];
+  XLSX.writeFile(wb, `勤怠_${periodPart}${suffix}.xlsx`, {bookSST:true});
   toast('Excelをダウンロードしました！');
 }
 
@@ -2092,7 +2819,7 @@ function exportEmpMasterExcel() {
   ws['!cols'] = [{wch:10},{wch:14},{wch:12},{wch:12},{wch:14},{wch:10},{wch:12},{wch:12},{wch:20}];
   // ヘッダー行に色をつける（SheetJSでの簡易スタイル）
   XLSX.utils.book_append_sheet(wb, ws, '従業員マスター');
-  XLSX.writeFile(wb, '従業員マスター.xlsx');
+  XLSX.writeFile(wb, '従業員マスター.xlsx', {bookSST:true});
   toast('Excelを出力しました');
 }
 
@@ -2266,7 +2993,14 @@ function saveSettings(){
   state.cfg.earlyStart=document.getElementById('cfg-early').value;
   state.cfg.otStart=document.getElementById('cfg-otstart').value;
   state.cfg.closingDay=parseInt(document.getElementById('cfg-closing').value)||20;
-  saveState();renderSettingsSummary();renderTable();calcSummary();toast('設定を保存しました');
+  saveState();
+  renderSettingsSummary();
+  updateMonthStatusBar();
+  renderEmpTabs();
+  renderTable();
+  calcSummary();
+  renderAllSummary();
+  toast('設定を保存しました');
 }
 function renderSettingsSummary(){
   const cd = state.cfg.closingDay||20;
@@ -2302,21 +3036,28 @@ function importData(input){
 
 // ===== CLAUDE API / スキャン取込 =====
 
+// ★ セキュリティ：Claude APIキーはFirestore(state)に絶対保存しない。
+// このブラウザのlocalStorageにのみ保存し、他端末・他ユーザーには絶対共有されない。
+const CLAUDE_KEY_LS = 'tc_claude_api_key_local';
+
 function saveApiKey() {
   const key = document.getElementById('cfg-api-key').value.trim();
   if (!key) { alert('APIキーを入力してください'); return; }
-  state.cfg.claudeApiKey = key;
-  saveState();
+  try { localStorage.setItem(CLAUDE_KEY_LS, key); } catch(e) {}
   updateApiKeyStatus();
-  toast('APIキーを保存しました');
+  toast('APIキーをこの端末に保存しました（クラウド送信なし）');
+}
+
+function getLocalClaudeApiKey() {
+  try { return localStorage.getItem(CLAUDE_KEY_LS) || ''; } catch(e) { return ''; }
 }
 
 function updateApiKeyStatus() {
   const el = document.getElementById('apiKeyStatus');
   if (!el) return;
-  const key = state.cfg.claudeApiKey || '';
+  const key = getLocalClaudeApiKey();
   if (key) {
-    el.textContent = '✅ 設定済み（' + key.slice(0,12) + '…）';
+    el.textContent = '✅ 設定済み　※この端末のみ有効（キー内容は非表示）';
     el.style.color = 'var(--success)';
   } else {
     el.textContent = '未設定';
@@ -2391,13 +3132,17 @@ function buildScanPrompt(cardMonth) {
 
 【カラム対応】
 - 「定時出」列 = clockIn（出勤打刻）
-- 「時間外」列 = clockOut（退勤打刻）
-- 時刻はHH:MM形式（例："07:47"）
+- 退勤時刻（clockOut）は次の優先順位で1つだけ採用すること：
+  1. 「時間外」列に時刻があれば、その時刻をclockOutとする（定時退の時刻は無視）
+  2. 「時間外」列が空欄なら、「定時退」列の時刻をclockOutとする
+- clockOutに採用しなかった方の時刻は捨ててよい（両方は不要）
+- 時刻はHH:MM形式（例："07:47"。曜日の漢字や列名などの文字は一切含めない）
 
 【ルール】
 - 赤い印鑑がある日 = 休日。打刻があれば note:"休日出勤"、打刻がなければ出力しない
 - 打刻が全くない日は出力しない
 - 曜日は日付確認に使うこと（日付の誤りを防ぐ）
+- noteには休日出勤など特記事項のみを入れる。時刻文字列を入れてはいけない
 - JSON配列のみ返す（説明文・前置き一切不要）
 
 【出力形式】
@@ -2405,7 +3150,7 @@ function buildScanPrompt(cardMonth) {
 }
 
 async function runScan() {
-  const apiKey = state.cfg.claudeApiKey;
+  const apiKey = getLocalClaudeApiKey();
   if (!apiKey) { alert('設定ページでClaude APIキーを登録してください'); return; }
   if (!scanPdfBase64) { alert('PDFファイルを選択してください'); return; }
 
@@ -2561,18 +3306,19 @@ function clearScanResult() {
 
 // 指定月の全従業員残業データを計算してまとめる
 function calcOvertimeForMonth(ym) {
-  const monthData = state.monthData[ym] || {};
   const results = [];
   sortedEmps().forEach(emp => {
-    const rows = monthData[String(emp.id)] || monthData[emp.id] || [];
+    const rows = getCardRows(emp.id, ym);
     if (!rows.length) return;
     let ot = 0, early = 0, actual = 0, days = 0;
     rows.forEach(r => {
       if (!r.clockIn || !r.clockOut) return;
-      const t = calcTimes(r.clockIn, r.clockOut, emp);
-      actual += r._actualOverride != null ? r._actualOverride : (t.actual || 0);
-      early  += r._earlyOverride  != null ? r._earlyOverride  : (t.early  || 0);
-      if (emp.hasOT) ot += r._otOverride != null ? r._otOverride : (t.overtime || 0);
+      const t = calcTimes(r.clockIn, r.clockOut, emp, r.date);
+      if (t.isVacation) return; // 有休日はカウントしない
+      if (t.isHoliday) return; // 休日出勤は総実働等にカウントしない
+      actual += safeNum(r._actualOverride != null ? parseFloat(r._actualOverride) : t.actual);
+      early  += safeNum(r._earlyOverride  != null ? parseFloat(r._earlyOverride)  : t.early);
+      if (emp.hasOT) ot += safeNum(r._otOverride != null ? parseFloat(r._otOverride) : t.overtime);
       days++;
     });
     results.push({
@@ -2584,7 +3330,7 @@ function calcOvertimeForMonth(ym) {
       totalOt: parseFloat((early + ot).toFixed(2))
     });
   });
-  return results;
+  return results.sort((a, b) => b.totalOt - a.totalOt);
 }
 
 // 部署別に集計
@@ -2740,6 +3486,64 @@ function renderOvertimeAnalysis() {
     html += '</tbody></table>';
     document.getElementById('otPersonTable').innerHTML = html;
   }
+
+  renderOvertimeChart();
+}
+
+function renderOvertimeChart() {
+  const ym = document.getElementById('otMonth').value || currentMonth;
+  const filter = (document.getElementById('otChartFilter') || {}).value || 'top20';
+  const el = document.getElementById('otChartBody');
+  if (!el) return;
+
+  let data = calcOvertimeForMonth(ym); // 残業合計降順でソート済み
+
+  if (filter === 'top10')  data = data.slice(0, 10);
+  else if (filter === 'top20')  data = data.slice(0, 20);
+  else if (filter === 'over20') data = data.filter(r => r.totalOt >= 20);
+  else if (filter === 'over30') data = data.filter(r => r.totalOt >= 30);
+  // 'all' = そのまま
+
+  if (!data.length) {
+    el.innerHTML = '<div style="text-align:center;color:var(--text2);padding:1.5rem">対象データがありません</div>';
+    return;
+  }
+
+  const maxVal = Math.max(...data.map(r => r.totalOt), 1);
+
+  const barColor = v => {
+    if (v >= 45) return '#8B1A1A';
+    if (v >= 30) return '#854F0B';
+    if (v >= 20) return '#2E6DA4';
+    return '#2D6A3F';
+  };
+
+  let html = '<div style="padding:.25rem 0">';
+  data.forEach((r, i) => {
+    const pct   = (r.totalOt / maxVal * 100).toFixed(1);
+    const color = barColor(r.totalOt);
+    const warn  = r.totalOt >= 45 ? ' ⚠' : '';
+    html += `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:.45rem">
+        <div style="width:22px;text-align:right;font-size:11px;color:var(--text2);flex-shrink:0;font-family:var(--mono)">${i+1}</div>
+        <div style="width:90px;font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0" title="${r.emp.name}">${r.emp.name}</div>
+        <div style="flex:1;background:var(--surface2);border-radius:3px;height:20px;min-width:0;position:relative">
+          <div style="width:${pct}%;background:${color};height:100%;border-radius:3px;min-width:${r.totalOt>0?'3px':'0'}"></div>
+        </div>
+        <div style="width:50px;text-align:right;font-family:var(--mono);font-size:13px;font-weight:700;color:${color};flex-shrink:0">${r.totalOt.toFixed(1)}h${warn}</div>
+        <div style="width:60px;font-size:10px;color:var(--text2);flex-shrink:0">${r.dept||''}</div>
+      </div>`;
+  });
+  html += `</div>
+  <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:.85rem;font-size:11px;color:var(--text2);padding-top:.6rem;border-top:1px solid var(--border)">
+    <span><span style="display:inline-block;width:10px;height:10px;background:#2D6A3F;border-radius:2px;margin-right:3px;vertical-align:middle"></span>20h未満</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:#2E6DA4;border-radius:2px;margin-right:3px;vertical-align:middle"></span>20〜30h</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:#854F0B;border-radius:2px;margin-right:3px;vertical-align:middle"></span>30〜45h</span>
+    <span><span style="display:inline-block;width:10px;height:10px;background:#8B1A1A;border-radius:2px;margin-right:3px;vertical-align:middle"></span>45h以上 ⚠ 要注意</span>
+    <span style="margin-left:auto">対象: ${data.length}名</span>
+  </div>`;
+
+  el.innerHTML = html;
 }
 
 function exportOvertimeExcel() {
@@ -2793,7 +3597,7 @@ function exportOvertimeExcel() {
   ws3['!cols'] = [{wch:10},{wch:14},{wch:12},{wch:10},{wch:10},{wch:12},{wch:12},{wch:12}];
   XLSX.utils.book_append_sheet(wb, ws3, '個人別明細');
 
-  XLSX.writeFile(wb, `残業分析_${ym}.xlsx`);
+  XLSX.writeFile(wb, `残業分析_${ym}.xlsx`, {bookSST:true});
   toast('残業分析Excelを保存しました');
 }
 
@@ -2806,18 +3610,19 @@ function getPrevMonth(ym) {
 }
 
 function calcEmpSummary(empId, ym) {
-  const md = state.monthData[ym] || {};
-  const rows = md[String(empId)] || md[empId] || [];
+  const rows = getCardRows(empId, ym);
   const emp = state.empMasters.find(e => e.id === empId);
   let days=0, total=0, early=0, ot=0, late=0, issues=0;
   rows.forEach(r => {
+    const t = calcTimes(r.clockIn, r.clockOut, emp, r.date);
+    if (t.isVacation) { return; } // 有休日はカウントしない（要確認にもしない）
     if(r.clockIn && r.clockOut) {
+      if (t.isHoliday) { return; } // 休日出勤は総実働等にカウントしない
       days++;
-      const t = calcTimes(r.clockIn, r.clockOut, emp);
-      const earlyVal  = r._earlyOverride  != null ? r._earlyOverride  : (t.early  || 0);
-      const actualVal = r._actualOverride != null ? r._actualOverride : (t.actual || 0);
-      const otVal     = r._otOverride     != null ? r._otOverride     : (t.overtime || 0);
-      const lateVal   = r._lateOverride   != null ? r._lateOverride   : (t.late   || 0);
+      const earlyVal  = safeNum(r._earlyOverride  != null ? parseFloat(r._earlyOverride)  : t.early);
+      const actualVal = safeNum(r._actualOverride != null ? parseFloat(r._actualOverride) : t.actual);
+      const otVal     = safeNum(r._otOverride     != null ? parseFloat(r._otOverride)     : t.overtime);
+      const lateVal   = safeNum(r._lateOverride   != null ? parseFloat(r._lateOverride)   : t.late);
       total += actualVal; early += earlyVal; ot += otVal; late += lateVal;
     } else { issues++; }
   });
@@ -2863,8 +3668,8 @@ function renderCheck() {
   const container = document.getElementById('checkBody');
 
   const withData = sortedEmps().filter(e =>
-    ((state.monthData[ym] || {})[e.id] || []).length > 0 ||
-    ((state.monthData[prevYm] || {})[e.id] || []).length > 0
+    getCardRows(e.id, ym).length > 0 ||
+    getCardRows(e.id, prevYm).length > 0
   );
 
   if(!withData.length) {
@@ -2974,8 +3779,8 @@ function downloadCheckExcel() {
   const ym = document.getElementById('checkMonth').value || currentMonth;
   const prevYm = getPrevMonth(ym);
   const withData = sortedEmps().filter(e =>
-    ((state.monthData[ym] || {})[e.id] || []).length > 0 ||
-    ((state.monthData[prevYm] || {})[e.id] || []).length > 0
+    getCardRows(e.id, ym).length > 0 ||
+    getCardRows(e.id, prevYm).length > 0
   );
   if(!withData.length) { alert('データがありません'); return; }
 
@@ -3015,7 +3820,7 @@ function downloadCheckExcel() {
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws['!cols'] = [{wch:14},{wch:10},{wch:10},{wch:12},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:12},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10}];
   XLSX.utils.book_append_sheet(wb, ws, '月次チェック');
-  XLSX.writeFile(wb, `月次チェック_${ym}.xlsx`);
+  XLSX.writeFile(wb, `月次チェック_${ym}.xlsx`, {bookSST:true});
   toast('チェック表をダウンロードしました！');
 }
 
@@ -3036,23 +3841,17 @@ function renderCalendar() {
 
   const tabContainer = document.getElementById('calEmpTabs');
   tabContainer.innerHTML = '';
-  const monthData = state.monthData[ym] || {};
-
-  // monthDataのキーは文字列なので文字列で統一
-  function getEmpRows(empId) {
-    return monthData[String(empId)] || monthData[empId] || [];
-  }
 
   // データがある従業員を優先して初期選択（社員番号順）
   if(!calEmpId) {
     const sorted = sortedEmps();
-    const firstWithData = sorted.find(e => getEmpRows(e.id).length > 0);
+    const firstWithData = sorted.find(e => getCardRows(e.id, ym).length > 0);
     if(firstWithData) calEmpId = String(firstWithData.id);
     else if(sorted.length > 0) calEmpId = String(sorted[0].id);
   }
 
   sortedEmps().forEach(emp => {
-    const hasData = getEmpRows(emp.id).length > 0;
+    const hasData = getCardRows(emp.id, ym).length > 0;
     const btn = document.createElement('button');
     btn.className = `emp-tab${String(emp.id)===String(calEmpId)?' active':''}${hasData?' has-data':''}`;
     btn.innerHTML = `<span class="dot"></span>${emp.empNo?'<span style="font-size:10px;opacity:.6;margin-right:2px">'+emp.empNo+'</span>':''}${emp.name}`;
@@ -3066,7 +3865,7 @@ function renderCalendar() {
   }
 
   const emp = state.empMasters.find(e => String(e.id) === String(calEmpId));
-  const rows = [...getEmpRows(calEmpId)];
+  const rows = [...getCardRows(calEmpId, ym)];
   const rowMap = {};
   rows.forEach(r => { rowMap[r.date] = r; });
 
@@ -3255,9 +4054,9 @@ function renderVacation() {
         <span style="font-size:11px;color:var(--text2)"> 日</span>
       </td>
       <td>
-        <input type="date" value="${m.nextDate||''}"
+        <input type="date" value="${m.nextDate||''}" class="vac-nextdate-input"
           style="font-size:12px;border:1px solid var(--border);border-radius:5px;padding:3px 6px"
-          onchange="updateVacMaster(${emp.id},'nextDate',this.value)">
+          onchange="updateVacMaster(${emp.id},'nextDate',this.value,this)">
       </td>
       <td>
         <input type="number" value="${parseFloat(m.nextDays)||0}" step="0.5" min="0" max="40"
@@ -3266,9 +4065,10 @@ function renderVacation() {
         <span style="font-size:11px;color:var(--text2)"> 日</span>
       </td>
       <td>
-        <input type="date" value="${m.expiry||''}"
+        <input type="date" value="${m.expiry||''}" class="vac-expiry-input"
           style="font-size:12px;border:1px solid var(--border);border-radius:5px;padding:3px 6px"
-          onchange="updateVacMaster(${emp.id},'expiry',this.value)">
+          onchange="updateVacMaster(${emp.id},'expiry',this.value)"
+          title="次回付与日を入力すると自動計算されます（手動で上書きも可能）">
       </td>
       <td style="text-align:right;font-family:var(--mono);color:var(--text2)">${used.toFixed(1)} 日</td>
       <td style="${balColor};font-family:var(--mono);font-size:14px">${remaining.toFixed(1)} 日</td>`;
@@ -3284,10 +4084,15 @@ function renderVacation() {
     return;
   }
   allUses.forEach(u => {
-    const emp = state.empMasters.find(e => String(e.id) === String(u.empId));
+    const empOptions = sortedEmps().map(e =>
+      `<option value="${e.id}"${String(e.id)===String(u.empId)?' selected':''}>${(e.empNo?e.empNo+' ':'')+e.name}</option>`
+    ).join('');
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td style="font-weight:500">${emp ? emp.name : '不明'}</td>
+      <td style="font-weight:500">
+        <select style="font-size:12px;border:1px solid var(--border);border-radius:5px;padding:3px 4px;max-width:140px"
+          onchange="updateVacUse(${u.id},'empId',this.value)" title="登録する人を間違えた場合はここで変更できます">${empOptions}</select>
+      </td>
       <td style="font-family:var(--mono)">
         <input type="date" value="${u.date}"
           style="font-size:12px;border:1px solid var(--border);border-radius:5px;padding:3px 6px"
@@ -3310,13 +4115,26 @@ function renderVacation() {
   });
 }
 
-function updateVacMaster(empId, key, val) {
+function updateVacMaster(empId, key, val, inputEl) {
   const m = getVacMaster(empId);
   m[key] = key === 'nextDate' || key === 'expiry' ? val : parseFloat(val)||0;
+
+  // ★ 次回付与日を入力したら、有効期限（労基法：付与から2年＝次回付与日+1年）を自動計算
+  if (key === 'nextDate' && val) {
+    const d = new Date(val + 'T00:00:00');
+    d.setFullYear(d.getFullYear() + 1);
+    m.expiry = d.toISOString().slice(0,10);
+    // 同じ行の有効期限欄に即時反映（テーブル全体は再描画せずフォーカスを維持）
+    const row = inputEl ? inputEl.closest('tr') : null;
+    const expiryInput = row ? row.querySelector('.vac-expiry-input') : null;
+    if (expiryInput) expiryInput.value = m.expiry;
+  }
+
   renderVacationAlertBanner();
   // 残日数列だけ更新
   const remaining = calcVacBalance(empId);
   // 全体は再描画せずセルだけ更新（入力フォーカスを維持）
+  saveState();
 }
 
 function rerenderVacRow(input, empId) {
@@ -3342,7 +4160,7 @@ function saveVacDirect() {
 function updateVacUse(id, key, val) {
   const u = state.vacation.uses.find(u => u.id === id);
   if(!u) return;
-  u[key] = key === 'days' ? parseFloat(val)||0 : val;
+  u[key] = key === 'days' ? parseFloat(val)||0 : key === 'empId' ? parseInt(val) : val;
   saveState();
   renderVacation();
 }
