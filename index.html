@@ -1042,6 +1042,27 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
+// ===== 本番保護ガード =====
+// 本番ドメイン以外（ローカル確認・別環境でのプレビュー等）からは、
+// 誤って本番Firestoreにデータを書き込んでしまう事故を防ぐため、書き込みを自動的に無効化する。
+// 読み込み（get）は許可するので、本番データを見ながらの動作確認は可能。
+const PROD_HOSTNAMES = ['timecard-app-nu.vercel.app'];
+const IS_PROD_ENV = PROD_HOSTNAMES.includes(location.hostname);
+if (!IS_PROD_ENV) {
+  console.warn(
+    `⚠️ 本番環境ではないため（hostname: ${location.hostname}）、Firestoreへの書き込みは自動的に無効化されています。` +
+    ' 読み込みのみ可能です。本番データを変更するテストは行わないでください。'
+  );
+}
+// 本番ガード付きの保存関数。書き込み系はすべてこれ経由にすること。
+function guardedFirestoreSet(docName, data) {
+  if (!IS_PROD_ENV) {
+    console.warn(`[書き込みスキップ] timecard/${docName} への保存を無効化しました（本番環境ではないため）`);
+    return Promise.resolve();
+  }
+  return db.collection('timecard').doc(docName).set(data);
+}
+
 // ===== CONSTANTS =====
 const DAYS = ['日','月','火','水','木','金','土'];
 const LS_KEY = 'tc_app_v2';
@@ -1053,7 +1074,7 @@ function getUsers() {
 }
 function saveUsersToLS(users) {
   localStorage.setItem(USERS_KEY, JSON.stringify(users));
-  db.collection('timecard').doc('users').set({ users }).catch(e => console.error('Firestore users:', e));
+  guardedFirestoreSet('users', { users }).catch(e => console.error('Firestore users:', e));
 }
 let USERS = getUsers() || [{id:'admin', pw:'miedc2024', name:'管理者', isAdmin:true}];
 let currentUser = null;
@@ -1091,7 +1112,7 @@ function saveState() {
   // localStorageキャッシュ
   try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch(e) {}
   // Firestoreへ非同期保存
-  db.collection('timecard').doc('data').set(state)
+  guardedFirestoreSet('data', state)
     .then(() => showSaveIndicator())
     .catch(e => { console.error('Firestore save:', e); showSaveIndicator(); });
 }
@@ -1125,7 +1146,7 @@ async function loadConfig() {
 
 async function saveConfig() {
   try {
-    await db.collection('timecard').doc('config').set(appConfig);
+    await guardedFirestoreSet('config', appConfig);
   } catch(e) { console.error('Config save failed:', e); }
 }
 
