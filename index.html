@@ -580,7 +580,10 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
   <div class="card">
     <div class="card-head">
       <div class="card-title">👤 従業員マスター</div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--text2);cursor:pointer;margin-right:4px">
+          <input type="checkbox" id="showResignedToggle" onchange="renderEmpMaster()"> 退職者も表示
+        </label>
         <button class="btn btn-sm" onclick="exportEmpMasterExcel()">📥 Excel出力</button>
         <button class="btn btn-sm btn-success" onclick="document.getElementById('empMasterImportFile').click()">📤 Excelで取込</button>
         <input type="file" id="empMasterImportFile" accept=".xlsx,.xls" style="display:none" onchange="importEmpMasterExcel(this)">
@@ -588,6 +591,7 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
       </div>
     </div>
     <div class="card-body" style="padding:0">
+      <div id="resignedHiddenNote" style="display:none;padding:.6rem 1rem;font-size:12px;color:var(--text2);background:var(--surface2)"></div>
       <div class="table-wrap">
         <table class="master-table">
           <thead><tr>
@@ -597,8 +601,7 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
             <th>雇用区分</th>
             <th>所定時間(h)</th>
             <th>残業対象</th>
-            <th>契約終了日</th>
-            <th>契約状態</th>
+            <th>在籍状況</th>
             <th>操作</th>
           </tr></thead>
           <tbody id="empMasterBody"></tbody>
@@ -861,6 +864,30 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn" onclick="hideDeptForm()">キャンセル</button>
       <button class="btn btn-accent" onclick="saveDept()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 退職処理モーダル -->
+<div class="modal-bg" id="resignModal">
+  <div class="modal" style="max-width:440px">
+    <h3>🚪 退職処理</h3>
+    <div style="font-size:13px;color:var(--text2);margin-bottom:1rem" id="resignEmpLabel"></div>
+    <div class="form-item" style="margin-bottom:1rem">
+      <label>退職日</label>
+      <input type="date" id="resignDate">
+    </div>
+    <div style="background:var(--warn-bg);border:1px solid #EF9F27;border-radius:8px;padding:.75rem 1rem;font-size:12.5px;color:var(--text);margin-bottom:1.25rem;line-height:1.7">
+      <div style="font-weight:700;color:var(--warn);margin-bottom:.4rem">退職処理を行うと：</div>
+      ・退職日までのタイムカード・給与集計データはそのまま保持されます<br>
+      ・契約情報（契約期間・備考）は消去され、契約更新アラートの対象から外れます<br>
+      ・退職日より後の日付で入力されていたデータがあれば削除されます<br>
+      ・勤怠入力タブの従業員一覧・有休アラート等には表示されなくなります<br>
+      ・従業員マスターの「退職者も表示」で後から確認・復職できます
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn" onclick="hideResignForm()">キャンセル</button>
+      <button class="btn btn-danger" onclick="confirmResign()">退職処理を実行</button>
     </div>
   </div>
 </div>
@@ -1230,6 +1257,16 @@ function sortedEmps() {
   });
 }
 
+// 在籍中の従業員のみ（退職者を除く）
+function activeEmps() {
+  return sortedEmps().filter(e => !e.resigned);
+}
+
+// 指定年月のカード期間で表示対象となる従業員（在籍中 or その月にデータがある退職者）
+function empsForMonth(ym) {
+  return sortedEmps().filter(e => !e.resigned || getCardRows(e.id, ym).length > 0);
+}
+
 // 次の社員番号を自動採番（既存の最大値+1）
 function nextEmpNo() {
   const nums = state.empMasters.map(e => parseInt(e.empNo)).filter(n => !isNaN(n));
@@ -1549,7 +1586,7 @@ function renderEmpTabs() {
   container.innerHTML = '';
   const locks = state.locks || {};
   const lockKey = `${currentMonth}`;
-  sortedEmps().forEach(emp => {
+  empsForMonth(currentMonth).forEach(emp => {
     const hasData = getCardRows(emp.id, currentMonth).length > 0;
     const isConfirmed = locks[lockKey] && (locks[lockKey][emp.id] || locks[lockKey][String(emp.id)]);
     const btn = document.createElement('button');
@@ -2282,7 +2319,7 @@ function showXlsOption() {
   sortedEmps().forEach(e => {
     const o = document.createElement('option');
     o.value = String(e.id);
-    o.textContent = (e.empNo ? e.empNo + ' ' : '') + e.name;
+    o.textContent = (e.empNo ? e.empNo + ' ' : '') + e.name + (e.resigned ? '（退職済み）' : '');
     empSel.appendChild(o);
   });
   empSel.value = curEmp;
@@ -2695,7 +2732,7 @@ function renderContractAlertBanner() {
   const banner = document.getElementById('contractAlertBanner');
   if(!banner) return;
   const contracts = state.empMasters
-    .filter(e => (e.empType === 'contract' || e.empType === 'part') && e.contractEnd)
+    .filter(e => !e.resigned && (e.empType === 'contract' || e.empType === 'part') && e.contractEnd)
     .map(e => ({ emp: e, status: contractStatus(e) }))
     .filter(x => x.status && x.status.days <= 60)
     .sort((a,b) => a.status.days - b.status.days);
@@ -2714,20 +2751,46 @@ function renderEmpMaster() {
   renderContractAlertBanner();
   const tbody = document.getElementById('empMasterBody');
   tbody.innerHTML = '';
-  sortedEmps().forEach(emp => {
+  const showResigned = document.getElementById('showResignedToggle').checked;
+  const all = sortedEmps();
+  const resignedCount = all.filter(e => e.resigned).length;
+  const note = document.getElementById('resignedHiddenNote');
+  if (!showResigned && resignedCount > 0) {
+    note.style.display = '';
+    note.textContent = `退職者 ${resignedCount}名を非表示にしています（「退職者も表示」で確認できます）`;
+  } else {
+    note.style.display = 'none';
+  }
+  const list = showResigned ? all : all.filter(e => !e.resigned);
+
+  list.forEach(emp => {
     const typeLabels = { fulltime:'正社員', contract:'契約社員', part:'パート' };
     const typeBadges = { fulltime:'badge-gray', contract:'badge-warn', part:'badge-info' };
     const typeLabel = typeLabels[emp.empType||'fulltime'] || '正社員';
     const typeBadge = typeBadges[emp.empType||'fulltime'] || 'badge-gray';
     const cs = contractStatus(emp);
-    const contractEndCell = (emp.empType === 'contract' || emp.empType === 'part') && emp.contractEnd
-      ? `<span style="font-family:var(--mono);font-size:12px;color:${cs?cs.color:'var(--text)'}">${emp.contractEnd}</span>`
-      : '<span style="color:var(--text2)">—</span>';
-    const contractStatusCell = cs
-      ? `<span class="badge" style="background:${cs.bg};color:${cs.color}">${cs.label}</span>`
-      : '<span style="color:var(--text2)">—</span>';
+
+    let statusCell;
+    if (emp.resigned) {
+      statusCell = `<span class="badge" style="background:var(--surface2);color:var(--text2);border:1px solid var(--border)">退職済み（${emp.resignDate||'日付未設定'}）</span>`;
+    } else if (cs) {
+      const contractEndTxt = emp.contractEnd ? `契約終了：${emp.contractEnd}　` : '';
+      statusCell = `<span style="font-size:12px;color:var(--text2)">${contractEndTxt}</span><span class="badge" style="background:${cs.bg};color:${cs.color}">${cs.label}</span>`;
+    } else {
+      statusCell = '<span class="badge badge-ok">在籍中</span>';
+    }
+
+    const actionsCell = emp.resigned
+      ? `<button class="btn btn-sm" onclick="editEmpFn(${emp.id})">編集</button>
+         <button class="btn btn-sm btn-success" onclick="unresignEmp(${emp.id})">復職</button>
+         <button class="btn btn-sm btn-danger" onclick="deleteEmp(${emp.id})">完全削除</button>`
+      : `<button class="btn btn-sm" onclick="editEmpFn(${emp.id})">編集</button>
+         <button class="btn btn-sm" style="color:var(--warn);border-color:#EF9F27" onclick="showResignForm(${emp.id})">退職</button>
+         <button class="btn btn-sm btn-danger" onclick="deleteEmp(${emp.id})">削除</button>`;
+
     const tr = document.createElement('tr');
-    if(cs && cs.days <= 60) tr.style.background = cs.urgent ? '#FFF5F5' : '#FFFBF0';
+    if (emp.resigned) tr.style.opacity = '.6';
+    else if (cs && cs.days <= 60) tr.style.background = cs.urgent ? '#FFF5F5' : '#FFFBF0';
     tr.innerHTML = `
       <td style="font-family:var(--mono);font-weight:500;color:var(--text2)">${emp.empNo||'—'}</td>
       <td style="font-weight:500">${emp.name}</td>
@@ -2735,14 +2798,73 @@ function renderEmpMaster() {
       <td><span class="badge ${typeBadge}">${typeLabel}</span></td>
       <td style="font-family:var(--mono)">${emp.stdHours}h</td>
       <td><span class="badge ${emp.hasOT?'badge-ok':'badge-gray'}">${emp.hasOT?'あり':'なし'}</span></td>
-      <td>${contractEndCell}</td>
-      <td>${contractStatusCell}</td>
-      <td style="display:flex;gap:6px">
-        <button class="btn btn-sm" onclick="editEmpFn(${emp.id})">編集</button>
-        <button class="btn btn-sm btn-danger" onclick="deleteEmp(${emp.id})">削除</button>
-      </td>`;
+      <td>${statusCell}</td>
+      <td style="display:flex;gap:6px;flex-wrap:wrap">${actionsCell}</td>`;
     tbody.appendChild(tr);
   });
+}
+
+// ===== 退職処理 =====
+let resignTargetId = null;
+
+function showResignForm(id) {
+  const emp = state.empMasters.find(e => e.id === id);
+  if (!emp) return;
+  resignTargetId = id;
+  document.getElementById('resignEmpLabel').textContent =
+    `対象：${(emp.empNo?emp.empNo+' ':'')}${emp.name}（${emp.dept||'部署未設定'}）`;
+  document.getElementById('resignDate').value = now.toISOString().slice(0,10);
+  document.getElementById('resignModal').classList.add('show');
+}
+function hideResignForm() {
+  document.getElementById('resignModal').classList.remove('show');
+  resignTargetId = null;
+}
+
+// 退職日より後の日付のデータを全月から取り除く。削除件数を返す
+function purgeDataAfterDate(empId, afterDate) {
+  let removed = 0;
+  Object.keys(state.monthData || {}).forEach(ym => {
+    const bucket = state.monthData[ym];
+    const key = Object.keys(bucket).find(k => String(k) === String(empId));
+    if (!key) return;
+    const before = bucket[key].length;
+    bucket[key] = bucket[key].filter(r => !r.date || r.date <= afterDate);
+    removed += before - bucket[key].length;
+    if (bucket[key].length === 0) delete bucket[key];
+  });
+  return removed;
+}
+
+function confirmResign() {
+  const emp = state.empMasters.find(e => e.id === resignTargetId);
+  if (!emp) return;
+  const date = document.getElementById('resignDate').value;
+  if (!date) { alert('退職日を入力してください'); return; }
+  const removed = purgeDataAfterDate(emp.id, date);
+  emp.resigned = true;
+  emp.resignDate = date;
+  // 契約情報は退職に伴い消去（退職済みのため契約更新アラート等の対象から外す）
+  emp.contractStart = '';
+  emp.contractEnd = '';
+  emp.contractNote = '';
+  hideResignForm();
+  saveState();
+  renderEmpMaster();
+  renderEmpTabs();
+  toast(`${emp.name}を退職処理しました${removed ? `（退職日より後のデータ${removed}件を削除）` : ''}`);
+}
+
+function unresignEmp(id) {
+  const emp = state.empMasters.find(e => e.id === id);
+  if (!emp) return;
+  if (!confirm(`${emp.name}の退職を取り消し、在籍中に戻しますか？\n（契約情報は再登録が必要です）`)) return;
+  emp.resigned = false;
+  emp.resignDate = '';
+  saveState();
+  renderEmpMaster();
+  renderEmpTabs();
+  toast(`${emp.name}を在籍中に戻しました`);
 }
 
 function toggleContractFields() {
@@ -2772,7 +2894,9 @@ function showEmpForm(id=null) {
 function hideEmpForm(){document.getElementById('empFormModal').classList.remove('show');}
 function editEmpFn(id){showEmpForm(id);}
 function deleteEmp(id){
-  if(!confirm('削除しますか？'))return;
+  const emp = state.empMasters.find(e=>e.id===id);
+  const name = emp ? emp.name : '';
+  if(!confirm(`【${name}】を完全に削除しますか？\n\n過去のタイムカード・給与データも含めて全て削除され、復元できません。\n単に退職した従業員の記録を残しつつ表示だけ外したい場合は、代わりに「退職」ボタンを使ってください。`))return;
   state.empMasters=state.empMasters.filter(e=>e.id!==id);
   saveState();renderEmpMaster();renderEmpTabs();toast('削除しました');
 }
@@ -2798,7 +2922,7 @@ function saveEmp(){
 
 // ===== 従業員マスター Excel入出力 =====
 function exportEmpMasterExcel() {
-  const header = ['社員番号','氏名','部署','雇用区分','所定労働時間(h)','残業対象','契約開始日','契約終了日','備考'];
+  const header = ['社員番号','氏名','部署','雇用区分','所定労働時間(h)','残業対象','契約開始日','契約終了日','備考','在籍状況','退職日'];
   const typeMap = { fulltime:'正社員', contract:'契約社員', part:'パート' };
   const rows = [header];
   sortedEmps().forEach(e => {
@@ -2811,12 +2935,14 @@ function exportEmpMasterExcel() {
       e.hasOT ? 'あり' : 'なし',
       e.contractStart || '',
       e.contractEnd || '',
-      e.contractNote || ''
+      e.contractNote || '',
+      e.resigned ? '退職済み' : '在籍中',
+      e.resignDate || ''
     ]);
   });
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols'] = [{wch:10},{wch:14},{wch:12},{wch:12},{wch:14},{wch:10},{wch:12},{wch:12},{wch:20}];
+  ws['!cols'] = [{wch:10},{wch:14},{wch:12},{wch:12},{wch:14},{wch:10},{wch:12},{wch:12},{wch:20},{wch:10},{wch:12}];
   // ヘッダー行に色をつける（SheetJSでの簡易スタイル）
   XLSX.utils.book_append_sheet(wb, ws, '従業員マスター');
   XLSX.writeFile(wb, '従業員マスター.xlsx', {bookSST:true});
@@ -2847,6 +2973,8 @@ function importEmpMasterExcel(input) {
         contractStart: headerRow.findIndex(h => h.includes('契約開始')),
         contractEnd:   headerRow.findIndex(h => h.includes('契約終了')),
         contractNote:  headerRow.findIndex(h => h.includes('備考')),
+        status:        headerRow.findIndex(h => h.includes('在籍状況')),
+        resignDate:    headerRow.findIndex(h => h.includes('退職日')),
       };
       if (col.name < 0) { alert('「氏名」列が見つかりません。\n出力したExcelのフォーマットを確認してください。'); return; }
 
@@ -2869,14 +2997,18 @@ function importEmpMasterExcel(input) {
         const contractStart = col.contractStart >= 0 ? String(r[col.contractStart] || '').trim() : '';
         const contractEnd   = col.contractEnd >= 0 ? String(r[col.contractEnd] || '').trim() : '';
         const contractNote  = col.contractNote >= 0 ? String(r[col.contractNote] || '').trim() : '';
+        const statusRaw   = col.status >= 0 ? String(r[col.status] || '').trim() : '';
+        const resigned    = statusRaw === '退職済み';
+        const resignDate  = col.resignDate >= 0 ? String(r[col.resignDate] || '').trim() : '';
 
         // 既存の社員番号と照合して更新 or 新規追加
         const existing = empNo ? state.empMasters.find(e => String(e.empNo) === empNo) : null;
         if (existing) {
           Object.assign(existing, { empNo, name, dept, empType, stdHours, hasOT, contractStart, contractEnd, contractNote });
+          if (col.status >= 0) Object.assign(existing, { resigned, resignDate: resigned ? resignDate : '' });
           updateCount++;
         } else {
-          newEmps.push({ id: ++state.empIdSeq, empNo, name, dept, empType, stdHours, hasOT, contractStart, contractEnd, contractNote });
+          newEmps.push({ id: ++state.empIdSeq, empNo, name, dept, empType, stdHours, hasOT, contractStart, contractEnd, contractNote, resigned, resignDate: resigned ? resignDate : '' });
           addCount++;
         }
       }
@@ -2906,7 +3038,7 @@ function renderDeptMaster(){
   const tbody=document.getElementById('deptBody');
   tbody.innerHTML='';
   state.depts.forEach((d,i)=>{
-    const empCount = state.empMasters.filter(e => e.dept === d).length;
+    const empCount = state.empMasters.filter(e => e.dept === d && !e.resigned).length;
     const tr=document.createElement('tr');
     tr.innerHTML=`
       <td style="font-weight:500">${d}</td>
@@ -3082,7 +3214,7 @@ function initScanCard() {
   // 従業員セレクトを更新
   const sel = document.getElementById('scanEmpId');
   sel.innerHTML = '';
-  sortedEmps().forEach(e => {
+  empsForMonth(currentMonth).forEach(e => {
     const opt = document.createElement('option');
     opt.value = e.id;
     opt.textContent = (e.empNo ? e.empNo + ' ' : '') + e.name;
@@ -3843,14 +3975,14 @@ function renderCalendar() {
   tabContainer.innerHTML = '';
 
   // データがある従業員を優先して初期選択（社員番号順）
+  const monthEmps = empsForMonth(ym);
   if(!calEmpId) {
-    const sorted = sortedEmps();
-    const firstWithData = sorted.find(e => getCardRows(e.id, ym).length > 0);
+    const firstWithData = monthEmps.find(e => getCardRows(e.id, ym).length > 0);
     if(firstWithData) calEmpId = String(firstWithData.id);
-    else if(sorted.length > 0) calEmpId = String(sorted[0].id);
+    else if(monthEmps.length > 0) calEmpId = String(monthEmps[0].id);
   }
 
-  sortedEmps().forEach(emp => {
+  monthEmps.forEach(emp => {
     const hasData = getCardRows(emp.id, ym).length > 0;
     const btn = document.createElement('button');
     btn.className = `emp-tab${String(emp.id)===String(calEmpId)?' active':''}${hasData?' has-data':''}`;
@@ -4005,7 +4137,7 @@ function renderVacationAlertBanner() {
   const banner = document.getElementById('vacAlertBanner');
   if(!banner) return;
   const alerts = [];
-  sortedEmps().forEach(emp => {
+  activeEmps().forEach(emp => {
     const m = getVacMaster(emp.id);
     if(!m.nextDate) return;
     const daysUntil = Math.floor((new Date(m.nextDate) - now) / 86400000);
@@ -4034,7 +4166,7 @@ function renderVacation() {
   // 直接編集テーブル
   const tbody = document.getElementById('vacDirectBody');
   tbody.innerHTML = '';
-  sortedEmps().forEach(emp => {
+  activeEmps().forEach(emp => {
     const m = getVacMaster(emp.id);
     const used = (state.vacation.uses || [])
       .filter(u => String(u.empId) === String(emp.id))
@@ -4175,7 +4307,7 @@ function populateVacEmpSelect(selId) {
   const sel = document.getElementById(selId);
   if(!sel) return;
   sel.innerHTML = '';
-  sortedEmps().forEach(e => {
+  activeEmps().forEach(e => {
     const opt = document.createElement('option');
     opt.value = e.id; opt.textContent = (e.empNo ? e.empNo + ' ' : '') + e.name;
     sel.appendChild(opt);
